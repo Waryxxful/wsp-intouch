@@ -109,7 +109,9 @@ def _partir_saludo(texto: str) -> tuple[bool, str]:
 #
 # La invitacion ("¿en que te puedo ayudar?") es redundante cuando ya viene una
 # respuesta real detras: le pregunta al contacto algo que acaba de decir.
-WELCOME_IDENTIDAD = "¡Hola{nombre}! Soy Auto IA, el asistente virtual de Cavem 👋"
+WELCOME_IDENTIDAD = (
+    "¡Hola{nombre}! Soy el asistente virtual comercial de InTouch 👋"
+)
 WELCOME_INVITACION = (
     "¿En qué te puedo ayudar? Puedo mostrarte nuestro stock de usados, "
     "simular un financiamiento o agendar una hora en el taller."
@@ -138,7 +140,7 @@ _CORTESIA_APERTURA = {
     "de", "nuevo", "otra", "vez", "encantado", "encantada", "gusto", "mucho",
     "bienvenido", "bienvenida", "un", "una", "el", "la", "y", "aqui", "aca",
     "estoy", "para", "ayudarte", "servirte", "soy", "auto", "ia", "asistente",
-    "virtual", "cavem", "todo", "bien", "espero", "te", "en",
+    "virtual", "intouch", "in-touch", "todo", "bien", "espero", "te", "en",
 }
 
 

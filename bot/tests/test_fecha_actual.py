@@ -8,6 +8,7 @@ estado fue `2025-06-06T16:00` — año y mes inventados. El cliente se iba a
 presentar a una hora que no existía en el sistema.
 """
 from datetime import timedelta
+from unittest import skip
 from unittest.mock import patch
 
 from django.conf import settings
@@ -176,6 +177,10 @@ class BloqueSucursalUnicaTest(TestCase):
         refrescar_sucursal_unica()
         self.assertEqual(bloque_sucursal_unica(), "")
 
+    @skip("InTouch (Task 8, spec §2.2): build_agent_registry() ya no llama a "
+          "refrescar_sucursal_unica() -- InTouch no tiene sucursales, y sin "
+          "sucursales no hay nada que refrescar (seria una query por turno que "
+          "no alimenta a nadie). Este test era especifico de Cavem/Renault.")
     def test_el_registry_lo_refresca_en_contexto_sincrono(self):
         # bloque_sucursal_unica() NO puede consultar la BD: build_system_prompt
         # se invoca desde un nodo async del grafo y una query ahí levanta
@@ -186,6 +191,11 @@ class BloqueSucursalUnicaTest(TestCase):
         from bot.flow import agents
         self.assertIn("refrescar_sucursal_unica()", inspect.getsource(agents.build_agent_registry))
 
+    @skip("InTouch (Task 8, spec §2.2): el unico especialista registrado, "
+          "'comercial', a proposito NO incluye el bloque de sucursal unica -- "
+          "InTouch no tiene sucursales, y un bloque que habla de una sucursal "
+          "inexistente es una invitacion a inventarla. Ver "
+          "test_agente_comercial.py::BloquesDelPromptTest.test_no_menciona_sucursales.")
     def test_todos_los_especialistas_lo_incluyen(self):
         from bot.flow.agents import build_agent_registry
         for slug, agente in build_agent_registry().items():

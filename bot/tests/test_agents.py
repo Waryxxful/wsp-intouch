@@ -1137,6 +1137,10 @@ class ToolSchemasNoExponenDatosInyectadosTest(TestCase):
 
 
 class BuildAgentRegistryTest(TestCase):
+    @skip("InTouch (Task 8, spec §2.2): agendamiento/confirmacion/faq ya no son "
+          "estaticos registrados -- se movieron a AGENTES_NO_REGISTRADOS junto con "
+          "los especialistas de encuesta, y el unico especialista de codigo visible "
+          "para el ruteo es 'comercial'. Ver RegistroTest en test_agente_comercial.py.")
     def test_incluye_los_3_estaticos(self):
         from bot.flow.agents import build_agent_registry
         registry = build_agent_registry()
@@ -1144,6 +1148,13 @@ class BuildAgentRegistryTest(TestCase):
             {"agendamiento", "confirmacion", "faq"} & set(registry.keys()),
             {"agendamiento", "confirmacion", "faq"},
         )
+
+    def test_incluye_el_unico_estatico_de_intouch(self):
+        # Adaptado de test_incluye_los_3_estaticos (arriba, @skip): InTouch
+        # registra un solo especialista de codigo, "comercial" (spec §2.2).
+        from bot.flow.agents import build_agent_registry
+        registry = build_agent_registry()
+        self.assertIn("comercial", registry)
 
     def test_incluye_especialistas_personalizados_de_la_bd(self):
         from bot.models import CustomSpecialist, save_prompt_version
@@ -1364,8 +1375,17 @@ class BuildAgentRegistryEncuestasTest(TestCase):
     def test_el_codigo_de_los_especialistas_sigue_existiendo_por_linaje(self):
         # Se sacaron del registro, no del repo: si Cavem alguna vez corre una
         # campana de encuesta, se reactivan agregandolos de vuelta a AGENTS.
+        #
+        # ACTUALIZADO (Task 8, InTouch): ademas de las dos encuestas de Cavem,
+        # InTouch tambien desregistra todo el dominio automotriz heredado
+        # (agendamiento, confirmacion, faq) -- el unico especialista visible
+        # es "comercial" (spec §2.2). Los cinco quedan por linaje, para
+        # conservar su cobertura de tests.
         from bot.flow.agents import AGENTES_NO_REGISTRADOS
         self.assertEqual(
             set(AGENTES_NO_REGISTRADOS),
-            {"encuesta_servicio_tecnico", "encuesta_venta_auto_nuevo"},
+            {
+                "agendamiento", "confirmacion", "faq",
+                "encuesta_servicio_tecnico", "encuesta_venta_auto_nuevo",
+            },
         )

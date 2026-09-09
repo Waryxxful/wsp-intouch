@@ -84,6 +84,26 @@ def campos_de(nombre_agente: str) -> frozenset:
     return CAMPOS_BASE | CAMPOS_EXTRA_POR_AGENTE.get(nombre_agente, frozenset())
 
 
+# EL DOCSTRING DE ABAJO ES CORPUS, no documentación: `responder` se bindea a
+# TODOS los especialistas (graph.py::_specialist_node_con_tools), así que su
+# texto y la descripción de cada argumento entran en el payload de cada turno.
+# Está escrito para el vertical de ESTE bot (hallazgo I1 de la review final de
+# rama): hasta el 2026-09-09 documentaba `vehiculo_interes`, `presupuesto`,
+# `cuota_objetivo` y un enum de `intent` automotriz -- campos que no existen en
+# el contrato de InTouch -- y encima sin una sola tilde y con voseo, que es
+# exactamente el corpus del que el modelo copia su registro (biblia §III.3
+# ley 5).
+#
+# Se mantiene UN solo docstring y no uno por especialista a propósito: el
+# esquema de la tool se construye una vez al importar el módulo, y filtrarlo
+# por especialista significaría recortar el `args_schema` en cada bind -- un
+# cambio en el payload real que se le manda al LLM, sin forma de medirlo contra
+# el modelo en esta sesión. Los tres campos que sólo usan los especialistas
+# heredados desregistrados (`modelo_imagen`, `lead_class`,
+# `sucursal_direccion_ids`) siguen en el esquema porque su cobertura los exige,
+# pero su descripción ya no nombra el negocio de otro bot y declara su propia
+# precondición. Lo que queda sin resolver es el NOMBRE de
+# `sucursal_direccion_ids`, que sólo se arregla recortando el esquema.
 @tool(parse_docstring=True)
 async def responder(
     mensaje: str,
@@ -100,28 +120,28 @@ async def responder(
     sucursal_direccion_ids: list[int] | None = None,
     lead: dict | None = None,
 ) -> dict:
-    """Entrega tu respuesta final al cliente. Es el UNICO canal de salida: todo
-    lo que quieras que el cliente lea va en el argumento `mensaje` de esta
+    """Entrega tu respuesta final al contacto. Es el ÚNICO canal de salida: todo
+    lo que quieras que el contacto lea va en el argumento `mensaje` de esta
     herramienta, nunca como texto suelto.
 
-    Llamala recien cuando no necesites ninguna otra herramienta en este turno:
-    si primero tenes que consultar o registrar algo, llama a esa herramienta y
+    Llámala recién cuando no necesites ninguna otra herramienta en este turno:
+    si primero tienes que consultar o registrar algo, llama a esa herramienta y
     responde en la vuelta siguiente, ya con el resultado.
 
     Args:
-        mensaje: el texto exacto que se le manda al cliente por WhatsApp
-        extracted_data: datos nuevos del cliente que convenga recordar, como pares clave/valor (ej. {"presupuesto": 18000000})
-        next_state: estado del flujo para el proximo turno, vacio si no aplica
-        handoff: true si esta conversacion tiene que pasar a un humano ahora
-        handoff_reason: por que se deriva, obligatorio si handoff es true
-        requiere_revision: true si un humano deberia revisar este turno (riesgo de seguridad, reclamo grave, solicitud legal sobre datos personales)
-        motivo_revision: por que necesita revision, obligatorio si requiere_revision es true
-        intent: explorar, cotizar, financiar, test_drive, reservar, objecion, winback, handoff o cortesia
-        lead_class: HOT, WARM o COLD segun que tan cerca de comprar esta el cliente
-        stage: nuevo, descubrimiento, calificacion, cotizacion, simulacion, agenda, handoff, seguimiento, reclamo o cerrado
-        modelo_imagen: slug del modelo cuya foto conviene mandar en este turno, vacio si ninguna
-        sucursal_direccion_ids: ids de las sucursales cuya direccion estas compartiendo en este mensaje, vacio si ninguna
-        lead: antecedentes comerciales que el cliente HAYA DICHO, para que el vendedor retome el caso: nombre, email, comuna, vehiculo_interes, presupuesto, pie_disponible, cuota_objetivo, cuando_compra (la fecha en que quiere comprar, NO el plazo del credito), intencion, sentimiento, urgencia, proxima_accion, resumen. Los montos van como los dijo el cliente ("15 millones", "$8.000.000"): el sistema los pasa a numero. Nada de deducir ni estimar.
+        mensaje: el texto exacto que se le manda al contacto por WhatsApp
+        extracted_data: datos nuevos del contacto que convenga recordar, como pares clave/valor (ej. {"empresa": "Acme SpA"})
+        next_state: estado del flujo para el próximo turno, vacío si no aplica
+        handoff: true si esta conversación tiene que pasar a una persona ahora
+        handoff_reason: por qué se deriva, obligatorio si handoff es true
+        requiere_revision: true si una persona debería revisar este turno (riesgo de seguridad, reclamo grave, solicitud legal sobre datos personales)
+        motivo_revision: por qué necesita revisión, obligatorio si requiere_revision es true
+        intent: informarse, diagnosticar, cotizar, agendar_reunion, soporte, otro_asunto, cortesia o handoff
+        lead_class: HOT, WARM o COLD según qué tan cerca de concretar está el contacto
+        stage: nuevo, descubrimiento, diagnostico, recomendacion, calificacion, siguiente_paso, handoff o cerrado
+        modelo_imagen: slug del elemento cuya imagen conviene mandar en este turno, vacío si ninguna
+        sucursal_direccion_ids: sólo aplica si compartes direcciones de sedes físicas; si no es tu caso, déjalo vacío
+        lead: antecedentes que el contacto HAYA DICHO, para que el equipo comercial retome el caso: nombre_completo, correo, empresa, industria, cargo, pais_ciudad, situacion_contact_center, tipo_contact_center, usa_ia_actualmente, canales_actuales, volumen_interacciones, necesidad_principal, soluciones_interes, intencion, plazo_proyecto, solicita_consultoria, solicita_contacto_humano, resumen_conversacion, siguiente_accion_recomendada. Nada de deducir ni estimar: un campo vacío se puede preguntar después, uno inventado se le entrega al ejecutivo como si fuera cierto.
     """
     # Esta funcion no se ejecuta en el camino normal: `_specialist_node_con_tools`
     # intercepta el tool_call de `responder` y lo trata como la respuesta final,
@@ -232,6 +252,10 @@ RECORDATORIO_RESPUESTA = (
 # de contaminacion. No dice "nada de JSON" ni "no repitas estas instrucciones":
 # nombrar un formato para prohibirlo lo mete igual en el contexto, y prohibir
 # repetir instrucciones es en si misma una instruccion repetible.
+#
+# ESTE ES EL HEREDADO y queda intacto: lo comparten los especialistas
+# desregistrados del dominio automotriz, cuya cobertura prueba defensas reales
+# de este stack. Los ejemplos de accion que enumera son los de ESE bot.
 _BLOQUE_PROSA = """
 
 ## RESPUESTA
@@ -241,6 +265,33 @@ Si en este turno necesitas ejecutar una acción (buscar en el stock, simular un
 financiamiento, agendar, registrar algo), llama a la herramienta que
 corresponda y responde recién en la vuelta siguiente, cuando ya tengas el
 resultado."""
+
+
+# La variante de este bot. Existe porque el bloque de arriba se le pegaba al
+# prompt de `comercial` EN CADA TURNO ofreciéndole tres acciones que ninguna
+# tool suya puede hacer -- "buscar en el stock", "simular un financiamiento",
+# "agendar" -- y el spec §6.2 las lista explícitamente fuera del binding
+# (hallazgo I2 de la review final de rama). Los ejemplos que enumera acá son
+# los de las tools que `comercial` sí tiene bindeadas
+# (bot/flow/agents/comercial.py::business_actions), sin nombrarlas: nombrar la
+# tool en el prompt es lo que ya cría el falso positivo de `responder` en el
+# doctor, y el docstring de cada tool lleva su propio contrato.
+_BLOQUE_PROSA_COMERCIAL = """
+
+## RESPUESTA
+Responde al contacto en texto normal, como le escribirías por WhatsApp.
+
+Si en este turno necesitas ejecutar una acción (consultar el catálogo de
+soluciones, buscar en la base de conocimiento, derivar un caso, registrar algo
+de compliance), llama a la herramienta que corresponda y responde recién en la
+vuelta siguiente, cuando ya tengas el resultado."""
+
+# Bloque de prosa por especialista. Un slug sin entrada acá se queda con el
+# heredado: es lo que corresponde para los desregistrados y para cualquier
+# CustomSpecialist creado desde el panel, que no tiene tools propias.
+_BLOQUES_PROSA_POR_AGENTE = {
+    "comercial": _BLOQUE_PROSA_COMERCIAL,
+}
 
 
 def bloque_contrato_respuesta(nombre_agente: str, modo: str = "prosa") -> str:
@@ -257,13 +308,19 @@ def bloque_contrato_respuesta(nombre_agente: str, modo: str = "prosa") -> str:
     (spec R6): un CustomSpecialist creado desde el panel cuyo prompt en BD lo
     pida a mano sigue funcionando.
 
+    En modo prosa el bloque es POR ESPECIALISTA
+    (`_BLOQUES_PROSA_POR_AGENTE`): sus ejemplos de accion tienen que ser cosas
+    que las tools de ESE especialista puedan hacer. Ofrecerle "buscar en el
+    stock" a un bot B2B que no tiene stock es prometerle al modelo una
+    capacidad inexistente en cada turno.
+
     El texto del bloque va CON tildes y sin voseo a proposito: todo lo que el
     modelo lee es corpus del que imita su registro, y un corpus sin tildes le
     ensena a escribir sin tildes -- hallazgo de la sesion del 2026-09-03, mismo
     origen que el "1 ano" que le llego a un cliente real.
     """
     if modo == "prosa":
-        return _BLOQUE_PROSA
+        return _BLOQUES_PROSA_POR_AGENTE.get(nombre_agente, _BLOQUE_PROSA)
     permitidos = campos_de(nombre_agente)
     lineas = [
         "\n\n## RESPUESTA",

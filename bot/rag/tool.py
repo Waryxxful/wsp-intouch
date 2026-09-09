@@ -170,12 +170,17 @@ async def _consultar_base_conocimiento_impl(query: str, tool_messages: list) -> 
 
 @tool(parse_docstring=True)
 async def consultar_base_conocimiento(query: str, runtime: ToolRuntime) -> dict:
-    """Busca información no estructurada (sitio, garantía, políticas, sucursales,
-    financiamiento, etc.) en la base de conocimiento vectorial. Formula la
-    query con tus propios términos, no necesariamente los mismos que usó el
-    cliente -- puedes reformular si un intento anterior no trajo nada útil.
+    """Busca información de fondo sobre InTouch en la base de conocimiento
+    vectorial: cómo funciona una solución, los modelos de operación, los
+    canales de atención, analítica y calidad, integraciones con CRM o ERP,
+    tratamiento de datos y seguridad, y quién es InTouch. Formula la query con
+    tus propios términos, no necesariamente los mismos que usó el contacto --
+    puedes reformular si un intento anterior no trajo nada útil.
+
+    No busques precios, tarifas, plazos ni casos de éxito: eso no está en la
+    base de conocimiento y no existe una respuesta que puedas dar por buena.
 
     Args:
-        query: los términos de búsqueda (puedes reformularlos, no tienen que ser literales del mensaje del cliente)
+        query: los términos de búsqueda (puedes reformularlos, no tienen que ser literales del mensaje del contacto)
     """
     return await _consultar_base_conocimiento_impl(query, runtime.state.get("tool_messages") or [])

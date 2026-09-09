@@ -90,17 +90,21 @@ def _crear_caso_impl(wa_id: str, tipo: str, resumen: str) -> dict:
 
 @tool(parse_docstring=True)
 async def crear_caso(tipo: str, resumen: str, runtime: ToolRuntime) -> dict:
-    """Crea un caso/ticket real de postventa para que un humano lo pueda
-    listar y revisar después -- no solo leer el chat de WhatsApp. Usar para
-    reclamos, garantía, repuestos, DyP, seguros, rent a car, mantención,
-    diagnóstico o campana técnica que no se puedan resolver en la
-    conversación. Distinto de handoff: handoff deriva ESTA conversación a un
-    humano ahora; crear_caso deja un registro estructurado que puede usarse
-    junto con handoff o sin el.
+    """Crea un caso real para que una persona del área que corresponde lo pueda
+    listar y tomar después -- no sólo leer el chat de WhatsApp. Úsala para las
+    consultas que NO son comerciales: soporte de un servicio que el contacto ya
+    tiene, postulaciones de empleo, ofertas de proveedores, reclamos, y
+    cualquier solicitud sobre datos personales. Distinto de un handoff: el
+    handoff deriva ESTA conversación a una persona ahora; crear_caso deja un
+    registro estructurado que se puede usar junto con el handoff o sin él.
+
+    Después de llamarla, dile al contacto con claridad que su consulta queda
+    registrada para el área correspondiente, y no la trates como una
+    oportunidad comercial.
 
     Args:
-        tipo: mantención|garantía|diagnóstico|reclamo|repuesto|campana_tecnica|dyp|seguro|rent_a_car|otro
-        resumen: resumen breve del caso a partir de la conversación (incluye datos ya conocidos: patente, modelo, etc. si los tienes)
+        tipo: soporte|empleo|proveedor|reclamo|datos_personales|otro
+        resumen: resumen breve del caso con las palabras del contacto, incluidos los datos que ya te haya dado (empresa, correo, de qué servicio se trata)
     """
     return await sync_to_async(_crear_caso_impl, thread_sensitive=True)(
         wa_id=runtime.state.get("wa_id", ""), tipo=tipo, resumen=resumen,

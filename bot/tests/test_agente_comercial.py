@@ -6,6 +6,8 @@ un límite semántico difuso -- un contacto que se queja calza con los dos. El
 precedente son las encuestas de Renault desregistradas en Cavem.
 """
 import re
+from pathlib import Path
+from unittest.mock import patch
 
 from django.test import SimpleTestCase, TestCase
 
@@ -53,6 +55,84 @@ class ToolsBindeadasTest(SimpleTestCase):
         # Si vuelve, vuelve la segunda ronda de 4,53s y nadie se entera por los
         # tests. Ver spec §7.1.
         self.assertNotIn("registrar_datos_lead", self.nombres)
+
+
+# Vocabulario del vertical retirado. Un docstring de tool es corpus que el
+# modelo lee EN CADA TURNO (biblia §III.3 ley 5), y las cuatro tools heredadas
+# que `comercial` bindea se describían en automotriz: `crear_caso` se
+# presentaba como ticket de postventa con enum garantía|repuesto|dyp|
+# rent_a_car, y `consultar_base_conocimiento` ofrecía "garantía, sucursales,
+# financiamiento" -- nada de eso existe en los siete .md de bot/fixtures/rag/.
+# Hallazgo I1 de la review final de rama.
+#
+# Se buscan con \b para no gritar por subcadena: "auto" vive dentro de
+# "automatización" y de "automotriz", las dos palabras legítimas acá.
+FORMAS_DE_OTRO_NEGOCIO = [
+    "vehículo", "vehiculo", "vehículos", "vehiculos", "autos?",
+    "patente", "stock", "garantía", "garantia", "repuestos?",
+    "sucursal", "sucursales", "financiamiento", "mantención", "mantencion",
+    "taller", "talleres", "dyp", "rent a car", "test drive",
+]
+
+
+class TextoQueElModeloLeeTest(SimpleTestCase):
+    """Las tools que lee `comercial` no pueden describirle otro negocio.
+
+    No es cosmética: el modelo imita el corpus que le llega, y además un
+    docstring que le insinúa garantías y financiamiento lo manda a buscar en
+    una base de conocimiento que no tiene eso. Se revisan la descripción de la
+    tool Y la de cada uno de sus argumentos -- las dos viajan en el payload.
+    """
+
+    def _textos_de(self, tool):
+        textos = [tool.description or ""]
+        for esquema in (tool.args or {}).values():
+            if isinstance(esquema, dict) and esquema.get("description"):
+                textos.append(esquema["description"])
+        return textos
+
+    def test_ninguna_tool_bindeada_describe_el_vertical_automotriz(self):
+        from bot.flow.agents.comercial import ComercialAgent
+        from bot.flow.respuesta import responder
+
+        # `responder` se bindea aparte de business_actions() (es el canal de
+        # salida, ver graph.py::_specialist_node_con_tools) pero lo lee el
+        # modelo igual, así que entra en el chequeo.
+        for tool in [*ComercialAgent().business_actions(), responder]:
+            for texto in self._textos_de(tool):
+                for forma in FORMAS_DE_OTRO_NEGOCIO:
+                    self.assertIsNone(
+                        re.search(rf"\b{forma}\b", texto, re.IGNORECASE),
+                        f'la tool "{tool.name}" le describe al modelo '
+                        f'"{forma}", que es de otro bot: {texto[:120]!r}',
+                    )
+
+    def test_el_docstring_de_responder_documenta_el_contrato_de_este_bot(self):
+        # El argumento `lead` es el que el modelo llena cuando contesta por
+        # `responder`, y sus nombres tienen que ser los que
+        # bot/business/lead_intouch.py sabe escribir: un nombre que no calce se
+        # ignora en silencio (ver `campos_ignorados`).
+        from bot.business.lead_intouch import CAMPOS_ESCRIBIBLES
+        from bot.flow.respuesta import responder
+
+        descripcion = responder.args["lead"]["description"]
+        nombrados = {c for c in CAMPOS_ESCRIBIBLES if c in descripcion}
+        # `subtipo_automotriz` queda fuera a propósito: es un campo del
+        # contrato de InTouch (el rubro de la EMPRESA del contacto) pero el
+        # docstring no lo enumera para no meter la palabra en el corpus, y el
+        # extractor lo captura igual en el camino de prosa.
+        self.assertEqual(CAMPOS_ESCRIBIBLES - nombrados, {"subtipo_automotriz"})
+
+    def test_el_docstring_de_responder_esta_en_espanol_correcto(self):
+        # Iba sin una sola tilde y con voseo ("Llamala recien", "tenes",
+        # "compartis"): el corpus del que el modelo copia su registro.
+        from bot.flow.respuesta import responder
+
+        textos = " ".join(self._textos_de(responder))
+        for forma in ("Llamala", "recien", "tenes", "compartis", "vacio",
+                      "conversacion", "revision", "proximo", "unico"):
+            self.assertIsNone(re.search(rf"\b{forma}\b", textos),
+                              f'"{forma}" aparece sin tilde o en voseo')
 
 
 class PromptTest(TestCase):
@@ -186,3 +266,72 @@ class BloquesDelPromptTest(TestCase):
         agente = ComercialAgent()
         armado = agente.build_system_prompt({}, agente.effective_prompt())
         self.assertNotIn("sucursal", armado.lower())
+
+    def test_el_bloque_de_respuesta_no_ofrece_acciones_que_no_puede_hacer(self):
+        # El bloque determinístico se pega al prompt EN CADA TURNO, y el
+        # heredado enumeraba "buscar en el stock, simular un financiamiento,
+        # agendar" como ejemplos de acciones -- ninguna tiene tool bindeada
+        # acá, el spec §6.2 las pone explícitamente fuera del binding
+        # (hallazgo I2). Este test mira el prompt ARMADO, que es donde se veía:
+        # el test hermano test_no_menciona_sucursales ya estaba en el lugar
+        # correcto y afirmaba sólo la ausencia de "sucursal".
+        from bot.flow.agents.comercial import ComercialAgent
+
+        agente = ComercialAgent()
+        armado = agente.build_system_prompt({}, agente.effective_prompt()).lower()
+        for prohibida in ("stock", "financiamiento", "agendar", "vehículo", "auto nuevo"):
+            self.assertNotIn(prohibida, armado, prohibida)
+
+    def test_el_bloque_de_respuesta_sigue_pidiendo_que_las_acciones_vayan_por_tools(self):
+        # La variante de este bot no puede perder la instrucción que el bloque
+        # existe para dar.
+        from bot.flow.agents.comercial import ComercialAgent
+
+        agente = ComercialAgent()
+        armado = agente.build_system_prompt({}, agente.effective_prompt())
+        self.assertIn("## RESPUESTA", armado)
+        self.assertIn("herramienta", armado.lower())
+
+    def test_incluye_el_bloque_de_ya_saludado_y_solo_cuando_corresponde(self):
+        # spec §8. El test que decía anclar esto (test_saludo_instantaneo.py)
+        # ejercitaba CustomPromptAgent, no el único especialista registrado de
+        # este bot: verde y sin cubrir nada (hallazgo I3). Sin el bloque, la
+        # bienvenida instantánea de handlers.py sale y el especialista vuelve a
+        # saludar -- 3/3 turnos medidos contra el LLM real.
+        from bot.flow.agents.comercial import ComercialAgent
+
+        agente = ComercialAgent()
+        prompt = agente.effective_prompt()
+        con = agente.build_system_prompt({"ya_saludamos": True}, prompt)
+        sin = agente.build_system_prompt({"ya_saludamos": False}, prompt)
+        self.assertIn("NO vuelvas a saludar", con)
+        self.assertNotIn("NO vuelvas a saludar", sin)
+
+
+class FixtureFaltanteTest(SimpleTestCase):
+    """Un fixture ausente tiene que decir QUÉ falta y CÓMO recuperarlo.
+
+    El comportamiento correcto es fallar al arrancar y no se cambia: un bot sin
+    el prompt de su único especialista no tiene nada útil que contestar. Lo que
+    faltaba es el motivo -- un FileNotFoundError crudo desde el cuerpo de un
+    módulo mata el import de todo Django sin nombrar el archivo, y esta sesión
+    persiguió ese fantasma tres veces atribuyéndolo al paralelismo.
+    """
+
+    def test_relanza_improperlyconfigured_con_la_instruccion(self):
+        import importlib
+
+        from django.core.exceptions import ImproperlyConfigured
+
+        import bot.flow.agents.comercial as modulo
+
+        with patch.object(Path, "read_text", side_effect=OSError("No such file")):
+            with self.assertRaises(ImproperlyConfigured) as ctx:
+                importlib.reload(modulo)
+        # Se recarga de verdad para dejar el módulo con su prompt real: el
+        # reload anterior murió a mitad de camino.
+        importlib.reload(modulo)
+
+        mensaje = str(ctx.exception)
+        self.assertIn("prompt_comercial.md", mensaje)
+        self.assertIn("git checkout", mensaje)

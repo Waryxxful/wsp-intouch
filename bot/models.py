@@ -139,9 +139,27 @@ def get_setting(key: str, default: str = "") -> str:
 
 class Incident(models.Model):
     STATUS_CHOICES = [("abierto", "Abierto"), ("revisado", "Revisado"), ("cerrado", "Cerrado")]
+    # Los tipos de caso que este bot deriva de verdad van PRIMERO: son los que
+    # el prompt de `comercial` manda a `crear_caso` (soporte, empleo,
+    # proveedores, reclamo y solicitudes sobre datos personales, ver
+    # bot/fixtures/prompt_comercial.md). Sin ellos en esta lista, cualquier
+    # derivacion no comercial colapsaba a kind="otro" -- el dato original queda
+    # en context["tipo_original"], asi que no se perdia nada, pero el panel
+    # mostraba el mismo badge "otro" para una postulacion de empleo y para una
+    # consulta de proveedor, y el operador no las distinguia sin abrir el
+    # detalle. Se agregan y no se reemplaza: los tipos automotrices heredados
+    # siguen validos porque su cobertura prueba defensas reales de este stack
+    # (dedup por conversacion+tipo, colapso a "otro").
+    #
+    # `kind` es un CharField SIN choices a nivel de campo, asi que esta lista es
+    # validacion de Python (bot/models.py::crear_caso y
+    # bot/business/compliance.py::_crear_caso_impl) y agregarle valores no pide
+    # migracion.
     TIPO_CASO_CHOICES = [
+        ("soporte", "soporte"), ("empleo", "empleo"), ("proveedor", "proveedor"),
+        ("datos_personales", "datos_personales"), ("reclamo", "reclamo"),
         ("mantencion", "mantencion"), ("garantia", "garantia"), ("diagnostico", "diagnostico"),
-        ("reclamo", "reclamo"), ("repuesto", "repuesto"), ("campana_tecnica", "campana_tecnica"),
+        ("repuesto", "repuesto"), ("campana_tecnica", "campana_tecnica"),
         ("dyp", "dyp"), ("seguro", "seguro"), ("rent_a_car", "rent_a_car"), ("otro", "otro"),
     ]
     kind = models.CharField(max_length=100)
@@ -528,10 +546,12 @@ def registrar_incidente(conversation, kind: str, context: dict | None = None) ->
 
 
 def crear_caso(conversation, tipo: str, resumen: str) -> "Incident":
-    """Caso/ticket real de postventa (garantia, reclamo, repuesto, DyP, etc.)
-    para que un humano lo pueda listar y revisar despues -- no solo leer el
-    chat de WhatsApp. Reusa Incident (kind=tipo validado) en vez de una tabla
-    nueva, mismo criterio que registrar_incidente."""
+    """Caso/ticket real para que una persona lo pueda listar y tomar despues --
+    no solo leer el chat de WhatsApp. En este bot son las consultas que no son
+    comerciales (soporte, empleo, proveedores, reclamos, datos personales); los
+    tipos automotrices heredados siguen siendo validos, ver TIPO_CASO_CHOICES.
+    Reusa Incident (kind=tipo validado) en vez de una tabla nueva, mismo
+    criterio que registrar_incidente."""
     validos = {c[0] for c in Incident.TIPO_CASO_CHOICES}
     if tipo in validos:
         return Incident.objects.create(conversation=conversation, kind=tipo, context={"resumen": resumen})

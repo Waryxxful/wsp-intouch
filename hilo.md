@@ -83,94 +83,73 @@ Reemplazo mecánico a `/intouch/api`. Deuda anotada en un comentario de
 contract es el refactor de fondo, no se hizo esa noche (27 archivos sin
 tests que los cubran).
 
-Important: `admin_panel/proyeccion.py` (dataset de demo, 959 líneas) tenía
-diálogos, una sucursal y 3 campañas de WhatsApp con la identidad de
-Cavem/"Auto IA" vendiendo autos. Se reescribieron 11 de las 12
-conversaciones de `_TRANSCRIPCIONES` como diálogos B2B de InTouch, la
-sucursal de `reservas()` y las 3 `campanas()`.
+Important (planteado en el round 1, **revertido en el round 3, ver abajo**):
+se había reescrito el dataset de demo (`admin_panel/proyeccion.py`, 959
+líneas: diálogos, una sucursal y 3 campañas de WhatsApp con la identidad de
+Cavem/"Auto IA") a una narrativa B2B de InTouch. Eso rompió 3 tests reales
+de `admin_panel/tests_proyeccion.py` que protegen defensas de verdad
+(anti-alucinación de montos, cobertura de diálogo completo) y nunca se
+verificó en el momento (se corrió sólo `admin_panel.tests`, no
+`admin_panel.tests_proyeccion`). El round 3 revirtió ese contenido
+completo: ver la sección de abajo, es la versión final.
 
-**Lo que ese fix rompió y no se verificó en el momento** (se corrió sólo
-`admin_panel.tests`, no `admin_panel.tests_proyeccion`): el dataset quedó
-incoherente consigo mismo (antes era consistentemente automotriz -mal
-identidad, pero consistente-, después las transcripciones son B2B y
-`leads()`/`conversaciones()` siguen siendo compradores de auto), lo que hizo
-caer **3 tests reales** de `admin_panel/tests_proyeccion.py`
-(`test_la_simulacion_de_la_tucson_sale_de_la_tool_real`,
-`test_tres_conversaciones_tienen_dialogo_completo`,
-`test_los_vehiculos_del_lead_aparecen_en_su_conversacion`). Se arreglaron
-aparte 2 tests con string viejo hardcodeado (`test_son_las_tres_campanas_del_seed`,
-`test_usa_servicios_y_sucursal_que_existen_en_el_seed`, mismo patrón que el
-fix de `admin_panel/tests.py:140` del round de `/cavem/api`).
+### Round 2 (gate por cliente) + Round 3 (revert del contenido, se queda sólo el gate)
 
-### Round 2 (gate por cliente)
+El round 2 gateó `admin_panel/proyeccion.py` por `CLIENTE_ACTIVO`, pero
+sobre el dataset YA REESCRITO del round 1 -- combinación que dejó 3 tests en
+rojo (ver el punto anterior). El round 3 corrigió el orden: **una vez que
+existe el gate, reescribir el contenido no compra nada** (a nadie se le
+sirve ya) **y sí cuesta** (rompe tests que protegen defensas reales). La
+combinación correcta era gate + dataset intacto. Se revirtieron
+`admin_panel/proyeccion.py` y `admin_panel/tests_proyeccion.py` al estado
+anterior al round 1 (`git checkout 9429197 --`) y se reaplicó **sólo** el
+gate encima.
 
-La salida a la incoherencia de Round 1 no es completar el rewrite de las
-959 líneas (84 apariciones de dato automotriz, proyecto propio con su
-spec) ni revertirlo: es que este bot no sirva la demo de otro cliente.
-
-**Se gateó `admin_panel/proyeccion.py` completo por `CLIENTE_ACTIVO`**: las
-7 funciones públicas (`leads`, `reservas`, `campanas`, `dashboard`,
-`conversaciones`, `mensajes`, `es_id_proyectado`) devuelven vacío para
-cualquier cliente fuera de `{renault, astara, cavem}` (constante
-`_CLIENTES_CON_DEMO_AUTOMOTRIZ`), vía el decorador
-`_gatear_demo_automotriz`. Con `CLIENTE_ACTIVO=intouch`: listas vacías,
-`dashboard()`/`conversaciones()`/`mensajes()` con `es_proyeccion: False`, y
-`es_id_proyectado()` siempre `False`. Test propio agregado
-(`DemoAutomotrizGateadaPorClienteTest` en `tests_proyeccion.py`, 5 tests con
-`override_settings(CLIENTE_ACTIVO="intouch")` + 1 que fija que
+**Estado final: `admin_panel/proyeccion.py` queda con su dataset automotriz
+de Cavem/"Auto IA" 100% INTACTO (nunca se sirve a ningún cliente fuera del
+set heredado) y gateado por `CLIENTE_ACTIVO`.** Las 7 funciones públicas
+(`leads`, `reservas`, `campanas`, `dashboard`, `conversaciones`, `mensajes`,
+`es_id_proyectado`) devuelven vacío para cualquier cliente fuera de
+`{renault, astara, cavem}` (constante `_CLIENTES_CON_DEMO_AUTOMOTRIZ`), vía
+el decorador `_gatear_demo_automotriz`. Con `CLIENTE_ACTIVO=intouch`: listas
+vacías, `dashboard()`/`conversaciones()`/`mensajes()` con
+`es_proyeccion: False`, y `es_id_proyectado()` siempre `False`. Test propio
+agregado (`DemoAutomotrizGateadaPorClienteTest` en `tests_proyeccion.py`, 5
+tests con `override_settings(CLIENTE_ACTIVO="intouch")` + 1 que fija que
 renault/astara/cavem siguen viendo el dataset completo).
 
 **Deuda anotada, explícita, para que no se pierda:**
 
-1. **El dataset de demo queda gateado y sin narrativa propia para
-   InTouch.** Detrás del gate sigue existiendo el dataset automotriz de
-   Cavem (ahora invisible para `intouch`), y las 11 conversaciones B2B
-   reescritas en el Round 1 quedan ahí sin uso real, desacopladas de
-   `leads()`/`conversaciones()` (que siguen siendo compradores de auto). Si
-   algún día se activa un dataset de demo propio para este bot, conviene
-   partir de esas 11 conversaciones B2B (ya escritas, ya en tono correcto)
-   en vez de los compradores de auto — pero es trabajo propio, con su
-   propia narrativa coherente de punta a punta (`leads()`, `reservas()`,
-   `campanas()`, `conversaciones()`, no sólo las transcripciones), y un spec
-   propio, no un fix round de una review.
-2. **Deuda del `apiBase` (Round 1, Critical).** Los ~26 archivos de
-   `frontend/src/` usan rutas absolutas `/intouch/api/...` en vez de leer el
-   `apiBase` que el shell pasa por el contract (ver comentario en
-   `App.tsx`). Refactor de fondo pendiente, sin tests de frontend que lo
-   cubran hoy.
+1. **El dataset de demo queda conservado intacto y gateado por cliente,
+   sin narrativa propia para InTouch.** Sigue siendo la demo automotriz de
+   Cavem (sus 63 tests la protegen, incluida la defensa anti-alucinación de
+   `test_la_simulacion_de_la_tucson_sale_de_la_tool_real`), simplemente ya
+   no se le sirve a este bot. Si algún día InTouch quiere su propio dataset
+   de demo, es trabajo propio, con su propia narrativa B2B coherente de
+   punta a punta (`leads()`, `reservas()`, `campanas()`, `conversaciones()`,
+   `_TRANSCRIPCIONES`) y su propio spec -- no algo que se improvisa
+   reescribiendo encima del dataset de otro cliente.
+2. **Deuda del `apiBase` (Round 1, Critical -- esta sí se queda).** Los
+   ~26 archivos de `frontend/src/` usan rutas absolutas `/intouch/api/...`
+   en vez de leer el `apiBase` que el shell pasa por el contract (ver
+   comentario en `App.tsx`). Refactor de fondo pendiente, sin tests de
+   frontend que lo cubran hoy.
 
-### Línea base de tests — ACTUALIZADA (creció de 8 a 11 fallas)
+### Línea base de tests — vuelve a 8 (confirmado, no asumido)
 
-Corrida completa después de ambos rounds: **1603 tests (1598 + 5 nuevos del
-gate), 11 fallas (8 `ERROR` + 3 `FAIL`), 10 skipped.**
+Corrida completa después del revert del round 3: **1603 tests (1598 + 5
+nuevos del test del gate), 8 fallas (todas `ERROR`, cero `FAIL`), 10
+skipped.** Mismas 4 causas originales de la línea base de la Task 1, sin
+ninguna nueva:
 
-Los 8 `ERROR` originales siguen siendo los 4 grupos de arriba, sin cambios.
-Grupo nuevo:
+1. Lead de autos (stock de usados) — 3 ERROR (ver arriba).
+2. Binding/seed del especialista `ventas` — 4 ERROR (ver arriba).
+3. Fixture del prompt (`doctor.py::chequear_prompt_contra_fixture`) — 0
+   fallas, degradación silenciosa (ver arriba).
+4. Conocimiento del RAG (`bot/fixtures/rag/*.md`) — 1 ERROR (ver arriba).
 
-5. **Contenido de `_TRANSCRIPCIONES` vs. `leads()`/`conversaciones()` — 3
-   FAIL, en `admin_panel/tests_proyeccion.py`.** Consecuencia directa de la
-   reescritura del Round 1 (aprobada explícitamente, no un bug introducido
-   sin querer), y **no se arreglan en este fix round** porque arreglarlos
-   exigiría una de dos cosas fuera de alcance: revertir contenido de las
-   transcripciones (que el coordinador pidió dejar como están) o decidir
-   unilateralmente debilitar/borrar tests que protegen defensas reales de
-   la biblia §IV.1 (anti-alucinación de montos, cobertura de diálogo
-   completo) — decisión que no me corresponde tomar sola:
-   - `ChatsProyeccionTest.test_la_simulacion_de_la_tucson_sale_de_la_tool_real`:
-     verifica que la conversación `-1` mencione una simulación de
-     financiamiento calculada por la tool real
-     (`bot.business.ventas._simular_financiamiento_impl`), con cifras
-     exactas de una Tucson. La `-1` reescrita ya no habla de autos.
-   - `ChatsProyeccionTest.test_tres_conversaciones_tienen_dialogo_completo`:
-     exige al menos 3 conversaciones con 12+ mensajes. Las 11 diálogos B2B
-     nuevos son más cortos (6-11 turnos); sólo la `-10` (sin tocar, taller)
-     llega a 12+.
-   - `CoherenciaProyeccionTest.test_los_vehiculos_del_lead_aparecen_en_su_conversacion`:
-     para cada lead con conversación, exige que el modelo de auto de
-     `vehiculo_interes` aparezca literal en el texto de esa conversación.
-     Falla en la primera (`Camila Fuentes` / `Creta`) porque el test corta
-     al primer mismatch; probablemente fallaría en más de una si siguiera.
-
-**Pendiente de decisión del coordinador**: qué hacer con estos 3 tests
-(adaptarlos al nuevo contenido, aceptarlos como línea base ampliada a 11, u
-otra opción). No se tocaron sin ese visto bueno.
+Los 3 `FAIL` que había introducido el round 1 (`test_la_simulacion_de_la_
+tucson_sale_de_la_tool_real`, `test_tres_conversaciones_tienen_dialogo_
+completo`, `test_los_vehiculos_del_lead_aparecen_en_su_conversacion`)
+desaparecieron con el revert: el contenido que hacían fallar volvió a ser
+el original.

@@ -142,7 +142,7 @@ class ReservasProyeccionTest(TestCase):
         }
         filas = self.client.get("/demo/api/admin/reservas?modo=demo").json()
         self.assertTrue({f["servicio"] for f in filas} <= servicios_reales)
-        self.assertEqual({f["sucursal"] for f in filas}, {"Taller La Reina"})
+        self.assertEqual({f["sucursal"] for f in filas}, {"Cavem La Reina"})
 
     def test_muestra_los_dos_estados(self):
         filas = self.client.get("/demo/api/admin/reservas?modo=demo").json()
@@ -218,7 +218,7 @@ class CampanasProyeccionTest(TestCase):
         filas = self.client.get("/demo/api/admin/campanas?modo=demo").json()
         self.assertEqual(
             {f["campaign_type"] for f in filas},
-            {"webinar_agentes_ia", "diagnostico_gratuito", "soporte_control_calidad"},
+            {"cyber_auto_demo", "renueva_tu_auto", "servicio_tecnico_mantencion"},
         )
         self.assertTrue(all(f["id"] < 0 for f in filas))
 

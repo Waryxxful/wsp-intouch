@@ -20,9 +20,12 @@ from datetime import timedelta
 
 from django.conf import settings
 
-# Clientes que heredan este dataset. Los tres son marcas automotrices previas
-# a InTouch (ver bot/models.py::CLIENTE_CHOICES); un bot nuevo que no este en
-# este set no lo hereda -- ver el docstring de _gatear_demo_automotriz.
+# Clientes que heredan este dataset. Es la demo de un bot automotriz (marca
+# Cavem, autos usados) y se conserva INTACTA -- ni se borra ni se reescribe
+# -- porque sus 63 tests protegen defensas reales (ej.
+# test_la_simulacion_de_la_tucson_sale_de_la_tool_real, que verifica que la
+# cuota de la demo salga de la tool real y no este inventada). No se le
+# sirve a ningun cliente fuera de este set: ver _gatear_demo_automotriz.
 _CLIENTES_CON_DEMO_AUTOMOTRIZ = {"renault", "astara", "cavem"}
 
 
@@ -31,12 +34,11 @@ def _gatear_demo_automotriz(valor_vacio):
     `_CLIENTES_CON_DEMO_AUTOMOTRIZ`, devuelve `valor_vacio()` sin ejecutar la
     funcion real.
 
-    Este dataset es la demo de un bot automotriz. Un bot nuevo no hereda la
-    demo de otro cliente: mostrarle conversaciones falsas de compradores de
-    auto a un contacto de InTouch es peor que mostrar el panel vacio, que
-    ademas es la verdad de un bot recien levantado. Si InTouch quiere su
-    propio dataset de demo, es trabajo propio con su narrativa B2B -- ver
-    hilo.md.
+    Un bot nuevo no hereda la demo de otro cliente: mostrarle conversaciones
+    falsas de compradores de auto a un contacto de InTouch es peor que
+    mostrar el panel vacio, que ademas es la verdad de un bot recien
+    levantado. Si InTouch quiere su propio dataset de demo, es trabajo
+    propio con su narrativa B2B -- ver hilo.md.
     """
     def decorador(fn):
         @functools.wraps(fn)
@@ -205,11 +207,8 @@ def leads() -> list[dict]:
     (conversation_id -1..-12, que produce `conversaciones()`); los ultimos 8
     no tienen conversacion (conversation_id None, ultima interaccion None),
     que tambien pasa en la realidad: alguien pregunta y no vuelve a escribir.
-    Vehiculos y codigos quedaron congelados tal como salieron de
-    bot/fixtures/stock_cavem.csv (VehiculoUsado) antes de que ese fixture se
-    borrara junto con el resto del dominio Cavem (ver .origen-cavem): no son
-    datos inventados a mano, aunque la fuente original ya no exista en este
-    repo.
+    Vehiculos y codigos salen de verdad de bot/fixtures/stock_cavem.csv
+    (VehiculoUsado), no inventados.
 
     `ultima_interaccion` de esos 12 sale de _iso_actividad(), el mismo
     calculo que usa el updated_at de conversaciones(): las dos pantallas se
@@ -530,11 +529,9 @@ def reservas() -> list[dict]:
     que aca la convencion de ids negativos no aplica: los codigos llevan
     prefijo DEMO- en vez de eso. La DEMO-7009 es la que agenda en vivo la
     conversacion -10 de conversaciones(), con el mismo servicio, dia y hora
-    que dice ese dialogo. "Taller La Reina" (renombrada -- el seed que la
-    creaba con la marca de Cavem se borro con el resto de ese dominio, ver
-    .origen-cavem) es la unica sucursal, y los 8 servicios son los reales
-    (uno de cada uno, para mostrar el catalogo completo). Vehiculo y
-    kilometraje son coherentes con el
+    que dice ese dialogo. "Cavem La Reina" es la unica sucursal del
+    seed y los 8 servicios son los reales (uno de cada uno, para mostrar el
+    catalogo completo). Vehiculo y kilometraje son coherentes con el
     servicio agendado (una mantencion de 10.000 km no le corresponde a un
     auto con 90.000 km recorridos). 8 reservas activas y 1 cancelada, para
     que la pantalla muestre los dos estados.
@@ -545,7 +542,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****2210", "email": "amunoz@example.cl",
             "vehiculo": "Toyota RAV4", "patente": "BXRT-58",
             "vehiculo_anio": 2024, "vehiculo_km": 9200,
-            "servicio": "Mantencion 10.000 km", "sucursal": "Taller La Reina",
+            "servicio": "Mantencion 10.000 km", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-03", "hora": "09:00", "estado": "activa",
             "created_at": "2026-08-29T10:15:00-03:00",
         },
@@ -554,7 +551,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****4487", "email": "flagos@example.cl",
             "vehiculo": "Kia Rio", "patente": "CPLM-27",
             "vehiculo_anio": 2023, "vehiculo_km": 19800,
-            "servicio": "Mantencion 20.000 km", "sucursal": "Taller La Reina",
+            "servicio": "Mantencion 20.000 km", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-03", "hora": "14:00", "estado": "activa",
             "created_at": "2026-08-29T16:40:00-03:00",
         },
@@ -563,7 +560,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****3392", "email": "vreyes@example.cl",
             "vehiculo": "Mazda 3", "patente": "FZKB-63",
             "vehiculo_anio": 2021, "vehiculo_km": 46500,
-            "servicio": "Cambio de aceite y filtro", "sucursal": "Taller La Reina",
+            "servicio": "Cambio de aceite y filtro", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-04", "hora": "10:30", "estado": "activa",
             "created_at": "2026-08-30T09:05:00-03:00",
         },
@@ -572,7 +569,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****7761", "email": "cpizarro@example.cl",
             "vehiculo": "Hyundai Accent", "patente": "GTHN-91",
             "vehiculo_anio": 2019, "vehiculo_km": 68200,
-            "servicio": "Diagnostico electronico", "sucursal": "Taller La Reina",
+            "servicio": "Diagnostico electronico", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-04", "hora": "16:00", "estado": "activa",
             "created_at": "2026-08-30T18:20:00-03:00",
         },
@@ -589,7 +586,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****8815", "email": "",
             "vehiculo": "Toyota Yaris", "patente": "SKDT-52",
             "vehiculo_anio": 2017, "vehiculo_km": 98000,
-            "servicio": "Mantencion 20.000 km", "sucursal": "Taller La Reina",
+            "servicio": "Mantencion 20.000 km", "sucursal": "Cavem La Reina",
             # 2026-09-08 es martes, el dia que el cliente elige en el chat.
             "fecha": "2026-09-08", "hora": "09:00", "estado": "activa",
             "created_at": _iso_actividad(-10),
@@ -599,7 +596,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****5528", "email": "ctorres@example.cl",
             "vehiculo": "Suzuki Alto", "patente": "NPKS-41",
             "vehiculo_anio": 2014, "vehiculo_km": 112000,
-            "servicio": "Revision precompra", "sucursal": "Taller La Reina",
+            "servicio": "Revision precompra", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-08", "hora": "11:00", "estado": "activa",
             "created_at": "2026-08-31T12:00:00-03:00",
         },
@@ -608,7 +605,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****9043", "email": "mgodoy@example.cl",
             "vehiculo": "Peugeot 208", "patente": "JQWX-15",
             "vehiculo_anio": 2020, "vehiculo_km": 37400,
-            "servicio": "Alineacion y balanceo", "sucursal": "Taller La Reina",
+            "servicio": "Alineacion y balanceo", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-09", "hora": "09:30", "estado": "activa",
             "created_at": "2026-09-01T08:50:00-03:00",
         },
@@ -617,7 +614,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****1176", "email": "jalarcon@example.cl",
             "vehiculo": "Chevrolet Sail", "patente": "RVXQ-77",
             "vehiculo_anio": 2016, "vehiculo_km": 95300,
-            "servicio": "Revision de frenos", "sucursal": "Taller La Reina",
+            "servicio": "Revision de frenos", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-10", "hora": "15:30", "estado": "cancelada",
             "created_at": "2026-08-28T14:10:00-03:00",
         },
@@ -626,7 +623,7 @@ def reservas() -> list[dict]:
             "telefono": "+569 ****6634", "email": "rfuentes@example.cl",
             "vehiculo": "Subaru XV", "patente": "KDMP-34",
             "vehiculo_anio": 2018, "vehiculo_km": 58900,
-            "servicio": "Sanitizacion de aire acondicionado", "sucursal": "Taller La Reina",
+            "servicio": "Sanitizacion de aire acondicionado", "sucursal": "Cavem La Reina",
             "fecha": "2026-09-12", "hora": "09:00", "estado": "activa",
             "created_at": "2026-09-01T17:30:00-03:00",
         },
@@ -657,42 +654,42 @@ def campanas() -> list[dict]:
     """
     return [
         {
-            "id": -1, "nombre": "Webinar Agentes IA",
-            "campaign_type": "webinar_agentes_ia",
-            "template": "webinar_agentes_ia_v1", "segmento": "Base histórica",
-            "objetivo": "Reactivar prospectos de los últimos 6 meses",
+            "id": -1, "nombre": "Cyber Auto Demo",
+            "campaign_type": "cyber_auto_demo",
+            "template": "cyber_auto_demo_v1", "segmento": "Base histórica",
+            "objetivo": "Reactivar interesados de los últimos 6 meses",
             "mensaje": (
-                "InTouch: agentes conversacionales para WhatsApp, voz, chat y "
-                "email. Escribinos WEBINAR y te reservamos un cupo para la próxima demo en vivo."
+                "Cyber Auto CAVEM: hasta 20% dcto en usados seleccionados "
+                "y financiamiento preaprobado. Escribinos CYBER para ver el stock."
             ),
-            "palabra_clave": "WEBINAR", "activa": True,
+            "palabra_clave": "CYBER", "activa": True,
             "contactos": 620, "enviados": 610, "entregados": None,
             "leidos": None, "respuestas": 148, "leads": 96, "conversiones": 14,
         },
         {
-            "id": -2, "nombre": "Diagnóstico Gratuito",
-            "campaign_type": "diagnostico_gratuito",
-            "template": "diagnostico_gratuito_v1", "segmento": "Sin contact center propio",
-            "objetivo": "Ofrecer un diagnóstico gratuito de canales y volumen de atención",
+            "id": -2, "nombre": "Renueva tu Auto",
+            "campaign_type": "renueva_tu_auto",
+            "template": "renueva_tu_auto_v1", "segmento": "Vehículo con 5+ años",
+            "objetivo": "Ofrecer tasación y renovación del vehículo actual",
             "mensaje": (
-                "¿Tu equipo se satura respondiendo WhatsApp? En InTouch te hacemos "
-                "un diagnóstico gratis de tus canales. Escribí DIAGNOSTICO para agendarlo."
+                "¿Tu auto ya cumplió 5 años? En CAVEM te lo tasamos gratis y "
+                "te ayudamos a renovarlo. Escribí RENUEVA para agendar tu tasación."
             ),
-            "palabra_clave": "DIAGNOSTICO", "activa": True,
+            "palabra_clave": "RENUEVA", "activa": True,
             "contactos": 540, "enviados": 525, "entregados": None,
             "leidos": None, "respuestas": 110, "leads": 72, "conversiones": 9,
         },
         {
-            "id": -3, "nombre": "Soporte y Control de Calidad",
-            "campaign_type": "soporte_control_calidad",
-            "template": "soporte_control_calidad_v1",
-            "segmento": "Contrato próximo a renovar",
-            "objetivo": "Recordar la revisión periódica de calidad y agendar hora con el ejecutivo",
+            "id": -3, "nombre": "Servicio Tecnico",
+            "campaign_type": "servicio_tecnico_mantencion",
+            "template": "servicio_tecnico_mantencion_v1",
+            "segmento": "Mantención próxima a vencer",
+            "objetivo": "Recordar la mantención periódica y agendar hora de taller",
             "mensaje": (
-                "Tu próxima revisión de calidad está cerca. Agendá tu hora con tu "
-                "ejecutivo InTouch escribiendo SOPORTE y te confirmamos disponibilidad."
+                "Tu próxima mantención está cerca. Agendá tu hora en el taller "
+                "CAVEM escribiendo SERVICIO y te confirmamos disponibilidad."
             ),
-            "palabra_clave": "SOPORTE", "activa": True,
+            "palabra_clave": "SERVICIO", "activa": True,
             "contactos": 410, "enviados": 402, "entregados": None,
             "leidos": None, "respuestas": 79, "leads": 48, "conversiones": 5,
         },
@@ -823,126 +820,157 @@ def conversaciones() -> dict:
     return {"items": items, "count": len(items), "es_proyeccion": True}
 
 
-# Transcripciones (datos ficticios, igual que el resto del modulo). Los
-# nombres de soluciones y modelos de operacion son coherentes con el catalogo
-# que describe el spec (docs/superpowers/specs/2026-09-09-bot-intouch-
-# comercial-design.md §5.1): diseno de operacion a medida; agentes
-# conversacionales para WhatsApp/voz/chat/email; paneles y dashboards con
-# Power BI; integraciones con CRM/ERP (sujetas a evaluacion tecnica); y
-# analitica conversacional y control de calidad -- mas los tres modelos de
-# operacion (humano, hibrido, automatizado). El bot se presenta como
-# "Asesor Comercial IA de InTouch" (identidad fijada en el spec §8), tutea,
-# diagnostica la situacion de contact center/canales/volumen antes de
-# recomendar, y nunca compromete un precio exacto sin pasar por un
-# ejecutivo.
-#
-# Excepcion: la conversacion -10 no se reescribio. Es una reserva de taller
-# (liga con reservas()/DEMO-7009 mas abajo) del dominio automotriz heredado,
-# que quedo desregistrado pero no borrado (ver CLAUDE.md) -- se le sacaron
-# solo las menciones a "Cavem"/"Auto IA", sin inventarle una identidad de
-# InTouch que no le corresponde: ese especialista no es el que este bot usa.
+# Transcripciones. Todo numero de plata que aparece aca sale de una fuente
+# verificable, nunca de una estimacion a mano:
+#   - precios, kilometrajes, anios y equipamiento: bot/fixtures/stock_cavem.csv
+#     (columna "Precio Oferta CLP"),
+#   - montos a financiar y cuotas: bot.business.ventas._simular_financiamiento_impl
+#     y _simular_por_cuota_impl, corridas con esos precios,
+#   - valores de taller: los servicios de bot/management/commands/seed_cavem.py.
+# Si manana el cliente le hace la misma pregunta al bot en vivo, la cifra
+# tiene que dar igual. El bot habla como su prompt real (bot/flow/global_prompt.py
+# y bot/fixtures/prompt_ventas.md): se presenta como "Auto IA", tutea, vende
+# consultivo (pregunta antes de listar), cierra cada simulacion con la
+# advertencia obligatoria y NUNCA compromete un monto de tasacion.
 _TRANSCRIPCIONES = {
-    # Conversacion de referencia: valida que el saludo dispare preguntas de
-    # diagnostico (contact center, canales, volumen) en vez de listar el
-    # catalogo de soluciones de una sola vez.
+    # La conversacion estrella del docx S17. El runbook de la demo
+    # (docs/DEPLOY_CAVEM.md S9) verifica en vivo dos cosas de aca: que el
+    # saludo dispara preguntas de calificacion en vez de un catalogo volcado,
+    # y que la Tucson con $5.000.000 de pie da $14.990.000 a financiar.
     -1: [
-        ("user", "Hola, andamos viendo opciones para atender mejor los pedidos que nos llegan por WhatsApp"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. Para orientarte bien: ¿hoy tienen algún equipo o sistema atendiendo esos mensajes, o los responde alguien manualmente?"),
-        ("user", "Los responde una persona, pero se nos acumulan hartos en las tardes. Somos una cadena de ferreterías, como 12 locales"),
-        ("assistant", "Entendido. ¿Más o menos cuántas conversaciones por WhatsApp reciben al día entre los 12 locales?"),
-        ("user", "Unas 300 al día, calculo. Y también nos escriben por Instagram"),
-        ("assistant", "Con ese volumen y dos canales, te recomiendo agentes conversacionales para WhatsApp e Instagram con un modelo híbrido: el bot resuelve consultas de stock y horario, y deriva a una persona cuando hay una venta grande o un reclamo."),
-        ("assistant", "¿Cuál dirías que es la necesidad más urgente hoy: no perder pedidos, bajar el tiempo de respuesta, o algo de reportería para ver qué se pregunta más?"),
-        ("user", "Sobre todo no perder pedidos en la tarde, se nos escapan varias ventas"),
-        ("assistant", "Anotado. Con eso te arma la propuesta un ejecutivo, enfocada en el pico de la tarde. ¿Te acomoda que te contacten esta semana para una reunión de 30 minutos?"),
+        ("user", "Hola, quiero cambiar mi auto y estoy buscando un SUV usado"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Te ayudo a encontrarlo."),
+        ("assistant", "Para recomendarte bien y no llenarte de opciones: ¿para qué lo vas a usar principalmente, ciudad o también carretera? ¿Y tienes un presupuesto en mente?"),
+        ("user", "Ciudad casi todo el tiempo, ando con dos niños chicos. Presupuesto como 16 millones"),
+        ("assistant", "Perfecto. Con niños te conviene un SUV compacto: portón alto, buen espacio atrás y fácil de estacionar."),
+        ("assistant", "¿Cómo lo pensabas pagar: al contado, financiado, o dejando tu auto actual en parte de pago?"),
+        ("user", "Financiado. Tengo 5 millones de pie y quiero pagar como 320 mil al mes. Además tengo un Sail 2016 que quiero entregar"),
+        ("assistant", "Anotado: pie de $5.000.000, cuota objetivo cercana a $320.000 y tu Chevrolet Sail 2016 en parte de pago."),
+        ("assistant", "¿Tienes algún modelo en mente o prefieres que te proponga alternativas del stock?"),
+        ("user", "Vi un Tucson en su página, ese me gustó"),
+        ("assistant", "Sí, lo tenemos: Hyundai Tucson 2.0 AT Value 2023, 31.800 km, un dueño, código US003. Precio de oferta $19.990.000."),
+        ("assistant", "Es un SUV mediano, más grande que lo que veníamos conversando. ¿Te simulo el financiamiento con tu pie de $5.000.000?"),
         ("user", "Sí, dale"),
-        ("assistant", "Perfecto, Camila. Quedó agendada tu solicitud, un ejecutivo te escribe por acá para coordinar el horario."),
+        ("assistant", "Con el Tucson US003 a $19.990.000 y un pie de $5.000.000 (el 25%), quedan $14.990.000 a financiar."),
+        ("assistant", "A 36 meses: $587.156\nA 48 meses: $487.708\nA 60 meses: $430.188\nTasa referencial 1,99% mensual."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "Uf, es bastante más de lo que quiero pagar"),
+        ("assistant", "Te entiendo. Con $320.000 como referencia, el Tucson te queda alto salvo que estires mucho el plazo."),
+        ("assistant", "Con esa cuota y tu pie de $5.000.000, a 60 meses te alcanza hasta unos $16.150.465. En ese rango te recomiendo dos:"),
+        ("assistant", "Hyundai Creta 1.5 IVT Limited 2023, 20.300 km, $15.990.000 (US033): el de menos kilómetros y el más fácil de estacionar para el día a día."),
+        ("assistant", "Nissan Kicks 1.6 Advance CVT 2023, 29.800 km, $15.990.000 (US012): mismo precio, cámara 360° y garantía más larga, 6 meses o 10.000 km."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "El Creta me gustó. ¿En cuánto queda la cuota?"),
+        ("assistant", "Con el Creta US033 a $15.990.000 y tu pie de $5.000.000 quedan $10.990.000 a financiar."),
+        ("assistant", "A 60 meses: $315.395, justo en la cuota que buscabas.\nA 48 meses: $357.565, si prefieres pagarlo más rápido."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "¿Y si entrego el Sail? ¿Cuánto me darían por él?"),
+        ("assistant", "El monto de la tasación no te lo puedo comprometer yo: la hace un especialista con el auto a la vista."),
+        ("assistant", "Lo que sí, lo que te den por el Sail se suma a tu pie y esa cuota baja. Para dejarlo registrado, ¿me confirmas el kilometraje aproximado y si tiene deuda o prenda vigente?"),
+        ("user", "Tiene como 118 mil kilómetros y no tiene deuda"),
+        ("assistant", "Listo, quedó registrada la solicitud de tasación del Chevrolet Sail 2016, 118.000 km, sin deuda."),
+        ("assistant", "¿Te acomoda venir a verlo a Cavem La Reina, Av. Bilbao 1234? Atendemos de lunes a viernes de 08:30 a 18:00 y sábados de 09:00 a 13:00. En la misma visita tasamos el Sail."),
+        ("user", "Sí, el martes en la tarde puedo"),
+        ("assistant", "¿Me confirmas tu nombre para dejar la visita coordinada? Lo uso solo para que el ejecutivo te reciba con la simulación del Creta y la tasación del Sail preparadas."),
+        ("user", "Camila Fuentes"),
+        ("assistant", "Gracias, Camila. Dejo la visita para el martes en la tarde en Cavem La Reina y le paso tus antecedentes al ejecutivo, así no tienes que repetir nada."),
+        ("assistant", "Te confirmamos la hora exacta por acá."),
     ],
     -2: [
-        ("user", "Hola, quiero saber si InTouch tiene algo para agilizar la atención de nuestra correduría de seguros"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. Cuéntame: ¿hoy tienen un contact center propio, externalizado, o la atención la hace directamente el equipo comercial?"),
-        ("user", "Es un equipo comercial de 8 personas, sin contact center. Ya evaluamos otro proveedor pero no nos convenció"),
-        ("assistant", "¿Qué fue lo que no les convenció, para no repetir lo mismo?"),
-        ("user", "Que no distinguía bien entre consulta de póliza y venta nueva, mezclaba todo"),
-        ("assistant", "Con ese antecedente te recomiendo un agente conversacional con diseño de operación a medida: se define primero el árbol de consultas (siniestro, renovación, cotización) antes de automatizar nada, justamente para no mezclar los flujos."),
-        ("user", "Me interesa. ¿Cuánto demora implementarlo?"),
-        ("assistant", "Eso lo define un ejecutivo según el volumen y los canales que sumen. ¿Te preparo una propuesta formal esta semana?"),
-        ("user", "Sí, por favor"),
-        ("assistant", "Listo, Matías. Dejo la solicitud con un ejecutivo para que te envíe la propuesta formal."),
+        ("user", "Hola, vi el Suzuki Swift que tienen publicado. ¿Sigue disponible?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Sí, está disponible: Suzuki Swift 1.2 GLX CVT 2023, 22.400 km, un dueño, código US011, a $12.490.000. ¿Lo pensabas al contado o financiado?"),
+        ("user", "Financiado. Tengo 4 millones de pie y ya estoy preaprobado en mi banco. Lo estoy comparando con un hatchback parecido"),
+        ("assistant", "Con el Swift a $12.490.000 y un pie de $4.000.000 quedan $8.490.000 a financiar: a 48 meses son $276.227, con tasa referencial de 1,99% mensual. Para tu comparación, el Swift rinde 18,5 km/l aprox., el mejor consumo del stock hoy."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "Me sirve. ¿Puedo ir a probarlo?"),
+        ("assistant", "Sí. Dejo la solicitud con un ejecutivo para coordinar la prueba de manejo en Cavem La Reina, Av. Bilbao 1234, y te enviamos la cotización formal del Swift. ¿Te acomoda que te contacten hoy mismo?"),
     ],
     -3: [
-        ("user", "Hola, tenemos una clínica dental y la recepción no da abasto respondiendo WhatsApp"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. ¿La recepción atiende solo WhatsApp o también teléfono y otros canales?"),
-        ("user", "Teléfono y WhatsApp. Somos 3 sucursales y coordinamos hora ahí mismo"),
-        ("assistant", "¿Ya usan algún sistema de agenda o todo es manual?"),
-        ("user", "Todo manual, por eso se duplican horas a veces"),
-        ("assistant", "Con eso te recomiendo un agente conversacional para WhatsApp integrado a tu sistema de agenda, modelo automatizado para coordinar horas y modelo humano solo para casos de urgencia. Evita los cruces."),
-        ("user", "Suena bien. ¿Tiene panel para ver cómo va funcionando?"),
-        ("assistant", "Sí, se suma un panel con dashboards para seguimiento de horas agendadas y tiempos de respuesta."),
-        ("assistant", "¿Coordinamos una reunión con un ejecutivo para ver el detalle de implementación en tus 3 sucursales?"),
-        ("user", "Dale, esta semana si se puede"),
-        ("assistant", "Quedó registrada la solicitud, Javiera. Te contactan esta semana."),
+        ("user", "Hola, quiero cambiar mi March por algo más nuevo"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Te ayudo con las dos cosas: buscar tu próximo auto y registrar el March para tasación."),
+        ("assistant", "¿Buscas algo del mismo porte o te gustaría subir a un SUV? ¿Y cómo lo pensabas pagar?"),
+        ("user", "Un SUV chico, para ciudad. Tengo 6 millones de pie y quiero pagar como 300 mil al mes"),
+        ("assistant", "Con eso te muestro dos que calzan:"),
+        ("assistant", "Nissan Kicks 1.6 Advance CVT 2023, 29.800 km, $15.990.000 (US012): SUV urbano, cámara 360° y la garantía más larga de los dos, 6 meses o 10.000 km."),
+        ("assistant", "Hyundai Creta 1.5 IVT Limited 2023, 20.300 km, $15.990.000 (US033): mismo precio y menos kilómetros."),
+        ("user", "El Kicks, ya lo había visto en su página"),
+        ("assistant", "Con el Kicks a $15.990.000 y tu pie de $6.000.000 quedan $9.990.000 a financiar.\nA 60 meses: $286.697, dentro de los $300.000 que buscas.\nA 48 meses: $325.030, si prefieres pagarlo más rápido."),
+        ("assistant", "Tasa referencial 1,99% mensual. Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "¿Y el March me lo reciben en parte de pago?"),
+        ("assistant", "Sí. Para pedir la tasación necesito unos datos: ¿de qué año es el March y cuántos kilómetros tiene?"),
+        ("user", "Es 2015 y tiene 96 mil kilómetros"),
+        ("assistant", "Anotado: Nissan March 2015, 96.000 km. ¿Me pasas la patente y me confirmas si tiene deuda o prenda vigente?"),
+        ("user", "GJKS-38, y no tiene deuda"),
+        ("assistant", "Gracias. Última cosa: ¿en qué comuna está el auto y cómo dirías que está su estado general?"),
+        ("user", "En Ñuñoa, está bien cuidado y con las mantenciones al día"),
+        ("assistant", "Quedó registrada la solicitud de tasación del Nissan March 2015, 96.000 km, patente GJKS-38, sin deuda, en Ñuñoa."),
+        ("assistant", "El monto no te lo puedo adelantar: la tasación la hace un especialista con el auto a la vista. Lo que te den se suma a tu pie de $6.000.000 y baja la cuota del Kicks."),
+        ("user", "Ya, ¿y cuándo puedo ir?"),
+        ("assistant", "Te esperamos en Cavem La Reina, Av. Bilbao 1234, de lunes a viernes de 08:30 a 18:00 y sábados de 09:00 a 13:00."),
+        ("assistant", "¿Te coordino la visita con un ejecutivo para ver el Kicks y tasar el March el mismo día?"),
+        ("user", "Sí, el miércoles en la mañana"),
+        ("assistant", "Listo. Le paso tus antecedentes y los del March al ejecutivo para el miércoles en la mañana, así no tienes que repetir nada. Te confirmamos por acá."),
     ],
     -4: [
-        ("user", "Hola, buscamos algo para atender consultas de propiedades por WhatsApp"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. ¿Hoy cómo manejan esas consultas: cada agente inmobiliario directo, o algún sistema centralizado?"),
-        ("user", "Cada corredor responde las suyas, no hay nada centralizado"),
-        ("assistant", "Te recomiendo un agente conversacional con panel centralizado: responde consultas de disponibilidad y agenda visitas, y deriva al corredor asignado cuando hay intención real de compra."),
-        ("user", "¿Y para reportería, para saber qué propiedades preguntan más?"),
-        ("assistant", "Esa parte la cubre el módulo de analítica conversacional y control de calidad, que suma al panel."),
-        ("user", "Me interesa la combinación de los dos"),
-        ("assistant", "Perfecto. Con esa combinación un ejecutivo te arma la propuesta. ¿Confirmas tu cargo en la inmobiliaria para dejarlo anotado?"),
-        ("user", "Soy el gerente comercial"),
-        ("assistant", "Gracias, Ignacio. Quedó anotado y un ejecutivo te contacta para cerrar los detalles."),
+        ("user", "Buenas, me interesa el JAC JS4. ¿Qué colores tienen?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Del JS4 tengo una sola unidad: JAC JS4 1.5T CVT Luxury 2023, 33.500 km, color gris, $14.490.000 (código US018). ¿El color es determinante para ti?"),
+        ("user", "Prefería blanco, pero lo veo igual. ¿Cómo queda la cuota con 5,5 millones de pie?"),
+        ("assistant", "Con el JS4 a $14.490.000 y un pie de $5.500.000 quedan $8.990.000 a financiar: a 48 meses son $292.494, con tasa referencial de 1,99% mensual."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "Ya, avísame si les llega uno blanco"),
+        ("assistant", "Lo dejo registrado y te avisamos apenas ingrese un JS4 blanco. Mientras tanto le paso tus antecedentes a un ejecutivo para que te confirme si viene alguno en camino y te reserve la unidad gris si te decides."),
     ],
     -5: [
-        ("user", "Hola, somos una distribuidora de repuestos y queremos un canal de WhatsApp con supervisión"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. ¿Cuántas conversaciones manejan aproximadamente al mes hoy?"),
-        ("user", "Unas 2.000 al mes, entre cotizaciones y consultas de stock"),
-        ("assistant", "Con ese volumen te recomiendo agentes conversacionales para WhatsApp más un panel de supervisión con dashboards, para que el equipo vea en tiempo real cuántas se resuelven solas y cuántas necesitan un vendedor."),
-        ("assistant", "¿Tienen hoy algún sistema de cotización que debiéramos integrar?"),
-        ("user", "Sí, un ERP propio"),
-        ("assistant", "Anotado. Esa parte pasa por integraciones con CRM y ERP, que llevan una evaluación técnica previa antes de cotizar el proyecto completo."),
-        ("user", "Ya, ¿cómo seguimos?"),
-        ("assistant", "Un ejecutivo te contacta para coordinar esa evaluación técnica y armar la propuesta con el volumen que me diste."),
+        ("user", "Hola, me interesa el MG ZS que tienen publicado. ¿Qué equipamiento trae?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. MG ZS 1.5 Luxury AT 2023, 19.300 km, un dueño, $13.490.000 (código US015). Trae techo panorámico, cámara, sensores y llantas de aleación."),
+        ("user", "Se ve bien. Tengo 4,5 millones de pie y un Suzuki Alto 2014 que quiero entregar"),
+        ("assistant", "Con el ZS a $13.490.000 y un pie de $4.500.000 quedan $8.990.000 a financiar: a 48 meses son $292.494, con tasa referencial de 1,99% mensual."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("assistant", "Si el Alto entra en parte de pago, tu pie sube y esa cuota baja. ¿Me confirmas el kilometraje aproximado del Alto?"),
+        ("user", "Tiene como 104 mil"),
+        ("assistant", "Anotado: Suzuki Alto 2014, 104.000 km. Queda registrada la solicitud de tasación; el monto lo define un especialista con el auto a la vista, no te lo puedo adelantar. Un ejecutivo te va a enviar la simulación actualizada con la tasación incluida."),
     ],
     -6: [
-        ("user", "Hola, andamos comparando modelos de atención para una empresa de transporte de carga"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. ¿Qué modelo tienen hoy: atención humana, algún bot, o mixto?"),
-        ("user", "Todo humano por ahora, un equipo pequeño"),
-        ("assistant", "¿Buscan reemplazar ese equipo o que el bot los apoye en el pico de consultas?"),
-        ("user", "Que apoye, no reemplazar. El volumen sube fuerte fin de mes"),
-        ("assistant", "Para eso el modelo híbrido calza mejor que el automatizado: el bot resuelve seguimiento de despacho y horarios, y el equipo humano queda para negociación de tarifas y casos complejos."),
-        ("user", "Mándame más detalle de los dos modelos para comparar con el directorio"),
-        ("assistant", "Te envío el detalle de ambos por acá para que lo revisen con calma."),
+        ("user", "Hola, ando buscando una camioneta 4x4 para trabajo. ¿Tienen Hilux o Ranger?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Tengo las dos: Toyota Hilux SRV 2.8 4x4 AT 2021, 69.400 km, $27.490.000 (US008), y Ford Ranger XLT 3.2 4x4 AT 2022, 58.300 km, $25.990.000 (US007)."),
+        ("assistant", "¿Para qué tipo de trabajo la necesitas y cuántos kilómetros haces al año? Con eso te digo cuál te conviene más."),
+        ("user", "Reparto en regiones, harto kilómetro"),
+        ("assistant", "Para ruta las dos son diésel 4x4 automáticas, con 7 airbags y garantía de 6 meses o 10.000 km. La Ranger tiene 11.100 km menos y está $1.500.000 más barata; la Hilux rinde 10,0 km/l aprox. contra 9,5 km/l aprox. de la Ranger."),
+        ("user", "Mándame las fichas de las dos. Tengo unos 8 millones de pie"),
+        ("assistant", "Listo, te llegan las dos fichas por acá. Con ese pie un ejecutivo te prepara además las alternativas de financiamiento de cada una, para que compares la cuota antes de decidir."),
     ],
     -7: [
-        ("user", "Hola, quiero cotizar algo para nuestra planta agroindustrial"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. Para armar la cotización necesito dos datos: ¿cuántos canales de atención usan hoy y qué necesidad es la más urgente?"),
-        ("user", "Solo WhatsApp por ahora. Lo urgente es no perder pedidos de temporada alta"),
-        ("assistant", "Perfecto. Apenas confirmes el volumen aproximado te armo la recomendación exacta, porque el modelo cambia según eso."),
+        ("user", "Hola, quiero cotizar el Chevrolet Tracker"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Chevrolet Tracker 1.2T Premier AT 2023, 26.100 km, un dueño, $17.490.000 (código US013)."),
+        ("assistant", "Para armarte la cotización con financiamiento necesito dos datos: ¿con cuánto pie cuentas y qué cuota mensual te acomoda?"),
+        ("user", "La cuota como 310 mil. El pie lo tengo que ver todavía"),
+        ("assistant", "Perfecto. Apenas tengas el pie te hago la simulación exacta, porque el monto que se financia cambia con eso."),
         ("assistant", "¿Prefieres que un ejecutivo te llame o seguimos por acá?"),
         ("user", "Llámame mejor"),
         ("assistant", "Listo, dejo la solicitud de llamada con un ejecutivo."),
-        ("human", "Hola Antonia, soy Rodrigo de InTouch. Te llamé recién y no logré ubicarte. ¿Te acomoda que te llame mañana a las 11:00?"),
+        ("human", "Hola Antonia, soy Rodrigo de Cavem. Te llamé recién y no logré ubicarte. ¿Te acomoda que te llame mañana a las 11:00?"),
     ],
     -8: [
-        ("user", "Hola, estamos entre dos opciones: un agente conversacional o primero integrar nuestro CRM. ¿Qué recomiendan?"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. Depende de dónde está el cuello de botella hoy: ¿el problema es la atención en sí, o que la información vive separada del CRM?"),
-        ("user", "Más que nada la información separada, cuesta ver el historial completo del cliente"),
-        ("assistant", "Con eso te conviene partir por integraciones con CRM y ERP, que llevan evaluación técnica primero, y sumar el agente conversacional después, ya con esa base."),
-        ("user", "Tiene sentido. ¿Me mandas cómo es el proceso de evaluación técnica?"),
-        ("assistant", "Sí, te lo envío por acá. Con eso un ejecutivo agenda la evaluación con tu equipo técnico."),
+        ("user", "Hola, estoy entre el Tucson y el Sportage. ¿Cuál me recomiendas?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Tengo los dos: Hyundai Tucson 2.0 AT Value 2023, 31.800 km, un dueño, $19.990.000 (US003), y Kia Sportage 2.0 AT EX 2022, 42.100 km, dos dueños, $18.990.000 (US004)."),
+        ("assistant", "El Tucson es un año más nuevo y tiene 10.300 km menos; el Sportage está $1.000.000 más barato. ¿Qué pesa más para ti, el kilometraje o el precio?"),
+        ("user", "Me importa más el equipamiento. ¿Me mandas el comparativo de los dos?"),
+        ("assistant", "Sí, te lo preparo y te lo envío por acá. ¿Con cuánto pie estás pensando? Con eso le agrego la cuota de cada uno."),
+        ("user", "Unos 6 millones, y no quiero pasar de 340 mil al mes"),
+        ("assistant", "Anotado: pie de $6.000.000 y cuota tope de $340.000. Te mando el comparativo de equipamiento con la simulación de los dos, para que veas cuál calza con esa cuota."),
     ],
     -9: [
-        ("user", "Hola, recién estamos mirando opciones para atención por WhatsApp en nuestras tiendas"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. Como recién están mirando: ¿te muestro el catálogo completo de soluciones para que vean todo el rango?"),
+        ("user", "Hola, recién estoy empezando a mirar. ¿Qué SUV usados tienen?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Tenemos varios, así que para no llenarte de opciones: ¿lo buscas más para ciudad o también para viajes? ¿Y tienes un rango de precio en mente?"),
+        ("user", "Para ciudad. El precio no lo tengo claro todavía, pero vi el Kia Seltos en su página"),
+        ("assistant", "El Seltos lo tenemos: Kia Seltos 1.6 AT EX 2023, 21.700 km, un dueño, $16.490.000 (código US032). Buena opción urbana, automático y con bajo kilometraje."),
+        ("assistant", "Si recién estás mirando, ¿te mando el catálogo completo de usados para que veas todo el rango?"),
         ("user", "Sí, mándamelo"),
-        ("assistant", "Listo, te llega por acá. Cuando tengan más claro el volumen y los canales que usan me escribes y te armo una recomendación concreta."),
+        ("assistant", "Listo, te llega por acá. Cuando tengas más clara la cuota que te acomoda me escribes y te hago la simulación."),
     ],
     -10: [
         ("user", "Hola, necesito hacerle la mantención a mi auto"),
-        ("assistant", "Hola, te ayudo a agendar la hora en el taller. ¿Qué vehículo es y de qué año?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Te agendo la hora en el taller. ¿Qué vehículo es y de qué año?"),
         ("user", "Un Toyota Yaris 2017"),
         ("assistant", "Gracias. ¿Cuántos kilómetros tiene marcados hoy? Es el dato que define qué mantención le corresponde."),
         ("user", "Como 98 mil"),
@@ -951,11 +979,11 @@ _TRANSCRIPCIONES = {
         ("user", "Ya, la mantención completa. ¿Tienes hora esta semana?"),
         ("assistant", "¿Me confirmas la patente del Yaris? Con eso reviso la disponibilidad."),
         ("user", "SKDT-52"),
-        ("assistant", "En Taller La Reina tengo estas horas: martes 09:00, martes 15:30 o miércoles 11:00. ¿Cuál te acomoda?"),
+        ("assistant", "En Cavem La Reina tengo estas horas: martes 09:00, martes 15:30 o miércoles 11:00. ¿Cuál te acomoda?"),
         ("user", "Martes a las 9"),
         ("assistant", "¿Me dices tu nombre para dejar la reserva? Lo uso solo para identificar tu hora en el taller."),
         ("user", "Vicente Tapia"),
-        ("assistant", "Listo, Vicente. Hora agendada: Mantención 20.000 km, martes 09:00, en Taller La Reina, Av. Bilbao 1234. Tu código de reserva es DEMO-7009."),
+        ("assistant", "Listo, Vicente. Hora agendada: Mantención 20.000 km, martes 09:00, en Cavem La Reina, Av. Bilbao 1234. Tu código de reserva es DEMO-7009."),
         ("assistant", "Llega 10 minutos antes con el permiso de circulación."),
         ("user", "Perfecto. Aprovechando, ¿cuánto vale un Corolla Cross usado? Estoy pensando en cambiar el Yaris"),
         ("assistant", "Tenemos uno: Toyota Corolla Cross 2.0 CVT SEG 2023, 27.400 km, un dueño, $23.290.000 (código US035)."),
@@ -968,20 +996,21 @@ _TRANSCRIPCIONES = {
         ("assistant", "El martes te entregan la tasación y la simulación actualizada del Corolla Cross."),
     ],
     -11: [
-        ("user", "Hola, ¿cuánto sale implementar un agente conversacional para nuestra concesionaria?"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. El valor depende del volumen y los canales que necesiten. ¿Hoy atienden solo WhatsApp o también web y redes?"),
-        ("user", "Todavía no tengo claro eso, primero quiero entender cómo funciona"),
-        ("assistant", "Dale. Te coordino una reunión con un ejecutivo para que te muestre una demo y ahí definimos canales y volumen juntos. ¿Te acomoda esta semana?"),
+        ("user", "Hola, ¿cuánto sale el Duster?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Renault Duster 1.3T CVT Iconic 2023, 28.600 km, un dueño, $16.490.000 (código US024). ¿Lo estás viendo al contado o con financiamiento?"),
+        ("user", "Todavía no sé, primero quiero verlo"),
+        ("assistant", "Dale. Está en Cavem La Reina, Av. Bilbao 1234; atendemos de lunes a viernes de 08:30 a 18:00 y sábados de 09:00 a 13:00. ¿Te coordino la visita con un ejecutivo para verlo y definir ahí la forma de pago?"),
         ("user", "Lo pienso y te aviso"),
-        ("assistant", "Sin problema, queda anotado. Si quieres te escribo la próxima semana para ver si coordinamos la reunión; si prefieres que no, me avisas y no te contactamos más."),
+        ("assistant", "Sin problema, queda anotado. Si quieres te escribo la próxima semana para ver si coordinamos la visita; si prefieres que no, me avisas y no te contactamos más."),
     ],
     -12: [
-        ("user", "Hola, tenemos un call center externalizado y queremos ver si conviene sumar agentes con IA"),
-        ("assistant", "Hola, soy el Asesor Comercial IA de InTouch. ¿El call center externalizado atiende todos los canales o solo teléfono?"),
-        ("user", "Solo teléfono. WhatsApp y web los maneja un equipo interno chico"),
-        ("assistant", "Ahí hay una oportunidad clara: agentes conversacionales para WhatsApp y web, con modelo híbrido, mientras el call center externalizado sigue con teléfono."),
-        ("user", "¿Tienen algún video o demo grabada para mostrarle a mi gerencia?"),
-        ("assistant", "Sí, te mando una demo grabada por acá. Y si tu gerencia quiere ver algo en vivo, un ejecutivo puede coordinar una demo en tiempo real."),
+        ("user", "Hola, me llamó la atención el Chery Tiggo 7 Pro. ¿Qué trae de equipamiento?"),
+        ("assistant", "Hola, soy Auto IA, el asistente virtual de Cavem. Chery Tiggo 7 Pro 1.5T CVT Luxury 2023, 27.600 km, un dueño, $16.490.000 (código US016). Trae techo panorámico, cámara 360°, climatizador dual, asientos eléctricos e iluminación LED."),
+        ("user", "Se ve bueno. Tengo 4 millones de pie, ¿en cuánto queda la cuota?"),
+        ("assistant", "Con el Tiggo 7 Pro a $16.490.000 y un pie de $4.000.000 quedan $12.490.000 a financiar: a 60 meses son $358.442, con tasa referencial de 1,99% mensual."),
+        ("assistant", "Simulación referencial para efectos de demostración. Financiamiento sujeto a evaluación y condiciones de la entidad financiera."),
+        ("user", "¿Tienen fotos o video de la unidad?"),
+        ("assistant", "Sí, te mando el video por acá. Y si quieres bajar esos $358.442, un ejecutivo puede revisar contigo un pie mayor o un auto en parte de pago."),
     ],
 }
 

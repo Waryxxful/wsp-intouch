@@ -153,3 +153,76 @@ tucson_sale_de_la_tool_real`, `test_tres_conversaciones_tienen_dialogo_
 completo`, `test_los_vehiculos_del_lead_aparecen_en_su_conversacion`)
 desaparecieron con el revert: el contenido que hacían fallar volvió a ser
 el original.
+
+---
+
+## 2026-09-09 — cierre de la sesión: las 20 tasks implementadas
+
+Plan completo (`docs/superpowers/plans/2026-09-09-bot-intouch-comercial.md`)
+ejecutado con subagentes: un implementer por task, reviews entre medio y un fix
+consolidado al final. 27 commits.
+
+### Números de partida
+
+Lo que hay que anotar acá es lo que nadie va a poder reconstruir después.
+
+| Qué | Valor | Cuándo se midió |
+|---|---|---|
+| Suite completa | **1.763 tests, 11 fallas, 13 skipped** | al cierre, árbol quieto |
+| Línea base heredada al copiar el árbol | 8 fallas ERROR, 4 causas identificadas | Task 1 |
+| `test_graph` tras reescribir `AGENTS` | 117 tests, OK — las 9 defensas conservadas | commit `cd37db3` |
+| `admin_panel` | 261 tests, OK (255 previos + 6 del panel de leads) | Task 18 |
+| Recall del RAG | **sin medir** — falta indexar | pendiente de credenciales |
+| Latencia | **sin medir** — el simulador no se corrió | pendiente de confirmación |
+
+Las 11 fallas están todas en archivos heredados del vertical automotriz, ninguna
+en código de InTouch. 9 de ellas son dos archivos huérfanos (`test_seed_cavem.py`
+prueba un comando borrado; `ReglasDeCalidadDelPromptTest` prueba reglas de
+sucursales y precios que este bot no tiene).
+
+### Lo que quedó bloqueado, y por qué
+
+Login SQL `intouch_login_qa` con `DEFAULT_SCHEMA=intouch`; credenciales de Meta;
+pegar el DDL de `docs/rag_schema_intouch.sql` en Supabase (su editor es web);
+confirmar `GRANCRM_TENANT_SLUG` (la cuenta `qaintouch` existe, pero define a qué
+cuenta llegan las notificaciones de lead HOT: es decisión de negocio).
+
+Ver `docs/PENDIENTE_CREDENCIALES.md` y `docs/DEPLOY_INTOUCH.md`.
+
+### Deuda declarada
+
+1. **Nueve tasks sin review formal** (8, 10, 12–18): tienen código y tests
+   propios en verde, pero sólo las tasks 1–7, 9 y 11 pasaron por un revisor
+   dedicado. Se hizo **una review agrupada** en vez de nueve individuales, y esa
+   decisión se justificó sola: encontró 4 Critical, y 3 eran de **interacción**
+   entre tasks, que una review por task no ve por definición.
+2. **El frontend no se compiló.** Los tipos se verificaron a mano contra el
+   `.d.ts` instalado; falta `pnpm build` y el `cp` a `staticfiles`.
+3. **El drift de tres repos** (biblia §VI.1): este bot es el tercero con el mismo
+   grafo copiado a mano. Lo que aporta al diseño de `wsp-bot-core`: hay que
+   parametrizar el vertical, el catálogo, el modelo de lead y las secciones del
+   `doctor`.
+4. **El frontend usa rutas absolutas** en vez del `apiBase` del contract (26
+   archivos sin tests).
+5. **`comercial.py` lee su fixture a nivel de módulo**: si falta, el traceback es
+   crudo. Merece un `ImproperlyConfigured` con la instrucción de restaurarlo.
+
+### Lo que esta sesión le enseñó al stack
+
+Cinco veces apareció el mismo modo de falla: **cambiar un registro central rompe
+en silencio lo que hardcodea sus valores.** Reformatear `CLIENTE_CHOICES` mató el
+generador del schema del RAG (exit 70, y ese script existe para no escribir el
+nombre del schema a mano — el error que mandó 297 chunks al schema equivocado).
+Cambiar `CATEGORIAS_RAG` dejó ~20 fixtures probando otra cosa sin fallar.
+Reescribir `AGENTS` dejó 9 tests del grafo esperando slugs muertos. Reemplazar los
+escenarios semilla rompió el test de su migración. Y la quinta, la peor: un test
+reseedeaba la base invocando por `importlib` la función de siembra de la
+**migración vieja**, resucitando en cada corrida los escenarios que la nueva había
+borrado — sin romper ningún assert, porque Django corre esas pruebas al final. La
+encontró un `grep` exigido como parte de la defensa, no un test en rojo.
+
+Está en `docs-repo/biblia_bots.md` §IV.1 con los cinco casos, y §V.2 con dos
+notas: un test que no falla ante el defecto que persigue no es un test, y un test
+no puede borrar ni dejar modificado un archivo trackeado del repo (caso real: los
+tests del `doctor` borraban el fixture del prompt en cada corrida, y como se lee
+en tiempo de import, después no arrancaba ni `manage.py check`).

@@ -233,7 +233,15 @@ def _registrar_lead_impl(wa_id: str, datos: dict, senales=None) -> dict:
 def registrar_lead_del_turno(wa_id: str, lead) -> None:
     """`_registrar_lead_impl` con la guarda de apertura y el aislamiento del turno.
 
-    Es el punto de entrada que usa la cola de envío. Tres reglas:
+    Es el punto de entrada que usan los DOS caminos de salida: la cola de
+    envío cuando la respuesta sale en prosa (el camino normal, el lead lo trae
+    el extractor) y el bloque post-grafo de `bot/whatsapp/handlers.py` cuando
+    sale por la tool `responder` (el lead lo trae el modelo en sus argumentos).
+    Los dos escriben en `LeadInTouch` y eso está anclado por
+    `bot/tests/test_lead_dos_caminos.py`: mientras uno de los dos apuntaba al
+    escritor automotriz heredado, sus turnos perdían el lead en silencio.
+
+    Tres reglas:
 
     1. Un `lead` vacío no hace nada (el extractor manda el objeto completo en
        blanco cuando no capturó nada).

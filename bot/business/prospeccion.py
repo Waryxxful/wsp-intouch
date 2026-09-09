@@ -346,10 +346,16 @@ _ANTECEDENTES_QUE_ABREN_LEAD = frozenset({
 def registrar_lead_del_turno(wa_id: str, lead) -> None:
     """`registrar_lead_de_metadatos` con la guarda y el aislamiento del turno.
 
-    Es el punto de entrada que usan los DOS caminos de salida -- la cola de
-    envio (respuesta en prosa) y el bloque post-grafo de handlers.py (respuesta
-    por la tool `responder`) -- para que ninguno tenga que acordarse de las
-    reglas de abajo.
+    ESCRITOR DEL DOMINIO AUTOMOTRIZ HEREDADO (LeadComercial). En wsp_intouch
+    ya no lo llama ningun camino de salida: los dos -- la cola de envio
+    (respuesta en prosa) y el bloque post-grafo de handlers.py (respuesta por
+    la tool `responder`) -- llaman a
+    bot.business.lead_intouch.registrar_lead_del_turno, que escribe
+    LeadInTouch. Sigue vivo porque `registrar_parte_pago` y la cobertura
+    heredada lo usan. Si vas a reapuntar un llamador, reapuntalo a lead_intouch
+    y no aca: los antecedentes que abren un lead de este modulo no comparten un
+    solo nombre con el contrato de InTouch, asi que un lead de InTouch entra
+    por aca y se descarta sin fila y sin log.
 
     QUE ABRE UN LEAD Y QUE NO, que es la parte delicada de este cambio. La tool
     creaba la fila cuando el especialista DECIDIA llamarla, o sea que la

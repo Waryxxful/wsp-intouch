@@ -575,9 +575,17 @@ async def _run_graph(conv: Conversation, text: str, msg_id: str, on_graph_result
     # `responder` el extractor no corre (los metadatos ya vinieron en sus args),
     # asi que el lead tiene que escribirse ACA tambien: si solo colgara del
     # extractor, estos turnos perderian el lead sin ningun error visible.
-    # Los dos caminos llaman a la misma funcion, ver docs/PENDIENTES.md 32.a.
+    #
+    # EL ESCRITOR ES EL DE ESTE BOT, no el heredado. Hasta el 2026-09-09 esta
+    # linea apuntaba a bot.business.prospeccion (LeadComercial, dominio
+    # automotriz) mientras la cola de envio ya apuntaba a lead_intouch: los dos
+    # conjuntos de antecedentes que abren un lead no comparten UN nombre
+    # (automotriz: comuna, vehiculo_interes, presupuesto...; InTouch: empresa,
+    # correo, industria, necesidad_principal...), asi que el lead completo se
+    # descartaba sin fila y sin log. Los dos caminos tienen que llamar al MISMO
+    # escritor, y eso lo ancla bot/tests/test_lead_dos_caminos.py.
     if result.get("lead"):
-        from bot.business.prospeccion import registrar_lead_del_turno
+        from bot.business.lead_intouch import registrar_lead_del_turno
         await sync_to_async(registrar_lead_del_turno, thread_sensitive=True)(
             conv.wa_id, result["lead"])
 

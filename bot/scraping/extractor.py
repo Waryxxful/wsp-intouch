@@ -111,30 +111,27 @@ async def _ainvoke_with_retry(llm, prompt: str, label: str = "scraping-extractor
                 await asyncio.sleep(LLM_BACKOFF_SECONDS[attempt])
     raise last_exc
 
-EXTRACTOR_PROMPT = """Sos un asistente que extrae informacion estructurada de negocio a partir de texto crudo scrapeado de un sitio web.
+EXTRACTOR_PROMPT = """Recibes el contenido de una página del sitio de InTouch, una empresa que
+provee soluciones de contactabilidad, experiencia de cliente, Contact Center,
+automatización y agentes conversacionales con IA para otras empresas.
 
-El texto esta dividido en paginas, cada una precedida por una linea "[Página: <url>]". Usa esa URL como contexto: si menciona un modelo/version especifico (ej. "/cotizar/koleos/techno-2-0t/"), CUALQUIER precio que aparezca en esa pagina corresponde a ESE modelo/version -- estas paginas suelen tener un selector con TODOS los modelos/versiones disponibles listados como opciones (ej. "Modelo Arkana Koleos Master"), pero eso es solo el menu del formulario, no significa que el precio mencionado les aplique a todos. No confundas el precio de una pagina con el de otro modelo que solo aparece nombrado como opcion del selector.
+Extrae los hechos que sirvan para responderle a una empresa interesada, como
+una lista de afirmaciones atómicas y autocontenidas. Cada afirmación tiene que
+entenderse sola, sin el resto de la página: menciona explícitamente de qué
+solución, canal o modelo de operación habla.
 
-Del siguiente texto, identifica:
-1. Los SERVICIOS/PRODUCTOS que ofrece el negocio (nombre, duracion en minutos si se menciona, precio si se menciona). Si el sitio es una concesionaria de autos, NO metas los modelos/versiones de vehiculo aca -- van en VEHICULOS (punto 3).
-2. Las SUCURSALES/ubicaciones donde el negocio atiende clientes presencialmente (nombre, direccion si se menciona, horario si se menciona).
-3. Los VEHICULOS (si el sitio es una concesionaria de autos): por cada modelo/version identificable (ej. "Koleos techno 2.0T"), y en "specs" cualquier dato tecnico que aparezca como par etiqueta:valor razonablemente limpio (motor, potencia, torque, consumo, transmision, numero de bolsas de aire, dimensiones). NO incluyas en "specs" listas largas de equipamiento/features marcadas si/no (ADAS, seguridad, confort, multimedia) -- esas quedan fuera, no las estructures. Si identificas de que pagina especifica proviene el precio/specs de ese vehiculo, incluye esa URL en "url_fuente" (usa las marcas [Página: <url>]); si no estas seguro, dejalo null.
+Reglas:
+- No inventes nada. Si la página no lo dice, no lo escribas.
+- No extraigas montos, tarifas, costos, plazos de implementación ni cifras de
+  resultados, aunque aparezcan: no se le pueden afirmar a un contacto sin
+  material comercial aprobado.
+- No extraigas nombres de clientes ni casos de éxito.
+- Omite la navegación, los formularios, los pies de página y el texto legal
+  del sitio.
+- Escribe en español correcto, con tildes.
 
-   MUCHOS sitios de concesionaria muestran hasta 3 precios distintos para el MISMO vehiculo -- no son versiones distintas, son 3 formas de pago del mismo auto. Extraelos en campos SEPARADOS, nunca mezclados en uno solo:
-   - "precio": el precio de LISTA (el mas alto de los 3, sin descuentos aplicados -- suele venir como "desde $X" o "precio lista $X").
-   - "precio_contado": el precio con cualquier medio de pago / al contado (con el bono de "cualquier medio de pago", si el sitio lo llama asi).
-   - "precio_financiado": el precio financiando con la marca (el mas bajo de los 3 normalmente, con el bono de financiamiento -- NO es el resultado de un calculo de cuotas, es el precio de venta ya con ese descuento aplicado).
-   Si el sitio solo muestra un precio (sin distinguir formas de pago), ponelo en "precio" y deja precio_contado/precio_financiado en null. NUNCA pongas el numero mas bajo (financiado) en el campo "precio" -- son campos distintos.
-
-REGLA CRITICA: si un dato (duracion_min, precio, precio_contado, precio_financiado, direccion, horario_texto, o cualquier valor de specs/url_fuente) NO aparece explicitamente en el texto, dejalo en null (o fuera de "specs"). NUNCA inventes valores.
-
-REGLA SOBRE SUCURSALES: NO incluyas como sucursal texto legal/corporativo (razon social, pie de pagina de copyright, telefonos de "servicio al cliente" de otro pais, direccion de la casa matriz/holding). Una sucursal es un lugar fisico al que un cliente puede ir -- si el texto es un aviso de derechos de autor o menciona una entidad corporativa en OTRO pais distinto al del sitio, ignoralo.
-
-Texto del sitio:
-{texto}
-
-Responde SOLO con este JSON exacto (sin markdown):
-{{"servicios": [{{"nombre": "...", "duracion_min": null, "precio": null}}], "sucursales": [{{"nombre": "...", "direccion": null, "horario_texto": null}}], "vehiculos": [{{"modelo": "...", "version": "...", "precio": null, "precio_contado": null, "precio_financiado": null, "specs": {{}}, "url_fuente": null}}]}}
+Contenido de la página:
+{contenido}
 """
 
 
@@ -268,7 +265,7 @@ def _combinar_catalogos(catalogos: list[dict]) -> dict:
 
 async def _extraer_un_chunk(llm, semaforo: asyncio.Semaphore, indice: int, chunk: str) -> dict:
     async with semaforo:
-        prompt = EXTRACTOR_PROMPT.format(texto=chunk)
+        prompt = EXTRACTOR_PROMPT.format(contenido=chunk)
         raw = await _ainvoke_with_retry(llm, prompt, label=f"scraping-extractor[{indice}]")
         return _parsear_respuesta(raw)
 

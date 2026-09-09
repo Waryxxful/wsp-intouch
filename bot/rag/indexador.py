@@ -8,22 +8,48 @@ logger = logging.getLogger(__name__)
 
 _SPLITTER = RecursiveCharacterTextSplitter(chunk_size=1000, chunk_overlap=150)
 
-CATEGORIAS_RAG = (
-    "garantia", "precio_financiamiento", "sucursales",
-    "servicio_tecnico", "vehiculo_specs", "politicas_generales", "otro",
-)
+# Las categorias con que se clasifica cada chunk. La lista es TODO lo que tiene
+# el clasificador, asi que una taxonomia de otro rubro le hace poner una
+# etiqueta que el filtro por categoria no conoce, y el chunk queda inalcanzable.
+#
+# "otro" existe para que el clasificador tenga donde poner lo que no calza, en
+# vez de forzar una etiqueta equivocada.
+CATEGORIAS_RAG = [
+    "soluciones",          # que hace cada solucion y para que sirve
+    "modelos_operacion",   # humano, hibrido, automatizado
+    "canales",             # WhatsApp, voz, chat, correo
+    "analitica",           # dashboards, Power BI, control de calidad
+    "integraciones",       # CRM, ERP, y que implica la evaluacion tecnica
+    "datos_y_seguridad",   # tratamiento de datos, ley 21.719, confidencialidad
+    "empresa",             # quienes son, como trabajan, cobertura
+    "otro",
+]
 
 # Mismo criterio que extractor.LLM_CONCURRENCIA_MAXIMA (bot/scraping/extractor.py) --
 # acota cuantas clasificaciones corren en paralelo por pagina, para no serializar
 # chunk por chunk ni saturar la API con todos a la vez.
 LLM_CONCURRENCIA_MAXIMA_CLASIFICACION = 5
 
-_PROMPT_CLASIFICACION = """Categoriza el siguiente fragmento de texto de un sitio de concesionaria de autos en UNA de estas categorias exactas: {categorias}.
+PROMPT_CLASIFICACION = """Eres un clasificador de documentación de InTouch, una empresa que integra IA,
+personas, datos, automatización, operación de Contact Center y analítica de
+gestión para otras empresas.
+
+Clasifica el fragmento en UNA de estas categorías:
+
+- soluciones: qué hace una solución de InTouch, para qué sirve, qué problema resuelve.
+- modelos_operacion: los modelos humano, híbrido o automatizado, y cuándo aplica cada uno.
+- canales: WhatsApp, voz, chat o correo electrónico.
+- analitica: dashboards, paneles, Power BI, analítica conversacional, control de calidad.
+- integraciones: integración con CRM, ERP u otros sistemas, y qué implica la evaluación técnica.
+- datos_y_seguridad: tratamiento de datos personales, confidencialidad, ley 21.719.
+- empresa: quién es InTouch, cómo trabaja, su cobertura y su forma de operar.
+- otro: cualquier cosa que no calce en las anteriores.
+
+Responde solo con el nombre de la categoría, sin explicar.
 
 Fragmento:
-{texto}
-
-Responde SOLO con la categoria elegida (una palabra de la lista, sin explicacion ni markdown)."""
+{fragmento}
+"""
 
 
 def _embeddings_client() -> GoogleGenerativeAIEmbeddings:
@@ -42,7 +68,7 @@ async def _clasificar_chunk(llm, semaforo: asyncio.Semaphore, texto: str) -> str
     # lista de content blocks en vez de string plano.
     from bot.scraping.extractor import _ainvoke_with_retry
     async with semaforo:
-        prompt = _PROMPT_CLASIFICACION.format(categorias=", ".join(CATEGORIAS_RAG), texto=texto[:2000])
+        prompt = PROMPT_CLASIFICACION.format(fragmento=texto[:2000])
         respuesta = await _ainvoke_with_retry(llm, prompt, label="rag-clasificador")
         raw = _texto_de_respuesta(respuesta).strip().lower()
         return raw if raw in CATEGORIAS_RAG else "otro"

@@ -26,7 +26,7 @@ interface SourceDetail {
   catalogo_extraido: { servicios: Record<string, unknown>[]; sucursales: Record<string, unknown>[] };
 }
 
-const PATH = '/cavem/api/admin/scraping-sources';
+const PATH = '/intouch/api/admin/scraping-sources';
 // Tope de caracteres a renderizar por pagina en el modal de Detalle -- una
 // pagina real (ej. un adjunto que se cuele pese al filtro de content-type,
 // o un caso legitimo de texto muy largo) puede tener cientos de miles o

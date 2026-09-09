@@ -58,7 +58,7 @@ export function PromptPanel() {
   const {
     items: customSpecialists, loading: loadingCustom, saving: savingCustom, error: customError,
     create: createCustom, update: updateCustom, remove: removeCustom, reload: reloadCustom,
-  } = useApiList<CustomSpecialist>('/cavem/api/admin/specialists');
+  } = useApiList<CustomSpecialist>('/intouch/api/admin/specialists');
 
   const [selected, setSelected] = useState('agendamiento');
   const isStatic = selected in AGENT_LABELS;
@@ -70,7 +70,7 @@ export function PromptPanel() {
   const [restoringId, setRestoringId] = useState<number | null>(null);
 
   const loadVersions = (agente: string) =>
-    apiFetch<PromptVersionInfo[]>(`/cavem/api/admin/prompt-versions?agente=${agente}`)
+    apiFetch<PromptVersionInfo[]>(`/intouch/api/admin/prompt-versions?agente=${agente}`)
       .then(setVersions)
       .catch(console.error);
 
@@ -80,7 +80,7 @@ export function PromptPanel() {
 
   const restoreVersion = async (versionId: number) => {
     setRestoringId(versionId);
-    await apiFetch('/cavem/api/admin/prompt-versions/restore', {
+    await apiFetch('/intouch/api/admin/prompt-versions/restore', {
       method: 'POST', body: JSON.stringify({ agente: agenteKey, version_id: versionId }),
     }).catch(console.error);
     if (isStatic) await loadStatic(selected);
@@ -96,7 +96,7 @@ export function PromptPanel() {
   const [saved, setSaved] = useState(false);
 
   const loadStatic = (agente: string) =>
-    apiFetch<PromptData>(`/cavem/api/admin/prompt?agente=${agente}`)
+    apiFetch<PromptData>(`/intouch/api/admin/prompt?agente=${agente}`)
       .then(d => { setStaticPrompt(d.prompt); setIsDefault(d.is_default); })
       .catch(console.error);
 
@@ -107,7 +107,7 @@ export function PromptPanel() {
   const saveStatic = async () => {
     setSavingStatic(true);
     let ok = true;
-    await apiFetch(`/cavem/api/admin/prompt?agente=${selected}`, {
+    await apiFetch(`/intouch/api/admin/prompt?agente=${selected}`, {
       method: 'POST', body: JSON.stringify({ prompt: staticPrompt }),
     }).catch(err => { ok = false; console.error(err); });
     await loadStatic(selected);
@@ -119,7 +119,7 @@ export function PromptPanel() {
   const restoreStatic = async () => {
     if (!confirm('¿Restaurar prompt al valor por defecto? Se perderá el override actual.')) return;
     setSavingStatic(true);
-    await apiFetch(`/cavem/api/admin/prompt?agente=${selected}`, {
+    await apiFetch(`/intouch/api/admin/prompt?agente=${selected}`, {
       method: 'POST', body: JSON.stringify({ action: 'reset' }),
     }).catch(console.error);
     await loadStatic(selected);

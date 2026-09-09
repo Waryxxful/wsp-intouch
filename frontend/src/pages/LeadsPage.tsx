@@ -73,7 +73,7 @@ export function LeadsPage() {
       if (modoDemo) params.set('modo', 'demo');
       setLoading(true);
       setError('');
-      apiFetch<Lead[]>(`/cavem/api/admin/leads?${params}`)
+      apiFetch<Lead[]>(`/intouch/api/admin/leads?${params}`)
         .then(datos => { if (vigente) setLeads(datos); })
         .catch(err => { if (vigente) setError(err.message || 'No se pudieron cargar los leads.'); })
         .finally(() => { if (vigente) setLoading(false); });
@@ -136,7 +136,7 @@ export function LeadsPage() {
           Desactivá “Proyección demo” para ver los datos efectivos.
         </Alert>
       )}
-      <PageHeader title="Leads" breadcrumbs={[{ label: 'Auto IA', href: '.' }, { label: 'Leads' }]}>
+      <PageHeader title="Leads" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Leads' }]}>
         <div className="form-check form-switch me-3">
           <input
             className="form-check-input"

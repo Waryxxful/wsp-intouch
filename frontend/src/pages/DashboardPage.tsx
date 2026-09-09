@@ -60,7 +60,7 @@ interface DashboardData {
 }
 
 // Meta Graph API stats — estadisticas del WhatsApp Business Account.
-// Fuente: /cavem/api/admin/meta-stats y /cavem/api/admin/template-stats.
+// Fuente: /intouch/api/admin/meta-stats y /intouch/api/admin/template-stats.
 interface MetaStats {
   ok: boolean;
   start: string;
@@ -169,7 +169,7 @@ export function DashboardPage({ basename }: { basename: string }) {
   useEffect(() => {
     const qs = modoDemo ? 'modo=demo' : `range=${range}`;
     const load = () =>
-      apiFetch<DashboardData>(`/cavem/api/admin/dashboard?${qs}`)
+      apiFetch<DashboardData>(`/intouch/api/admin/dashboard?${qs}`)
         .then(setData).catch(console.error).finally(() => setLoading(false));
     load();
     // La proyeccion es estatica: refrescarla cada 30s solo genera trafico.
@@ -184,8 +184,8 @@ export function DashboardPage({ basename }: { basename: string }) {
     setMetaError('');
     const qs = new URLSearchParams({ start: metaStart, end: metaEnd }).toString();
     Promise.all([
-      apiFetch<MetaStats>(`/cavem/api/admin/meta-stats?${qs}`),
-      apiFetch<TemplateStats>(`/cavem/api/admin/template-stats?${qs}`),
+      apiFetch<MetaStats>(`/intouch/api/admin/meta-stats?${qs}`),
+      apiFetch<TemplateStats>(`/intouch/api/admin/template-stats?${qs}`),
     ])
       .then(([m, t]) => {
         setMetaStats(m);
@@ -211,7 +211,7 @@ export function DashboardPage({ basename }: { basename: string }) {
         </Alert>
       )}
       <PageHeader
-        title="Auto IA — Dashboard"
+        title="Asesor Comercial IA — Dashboard"
         breadcrumbs={[{ label: 'Inicio', href: basename }, { label: 'Dashboard' }]}
       >
         <div className="form-check form-switch me-3">

@@ -5,7 +5,7 @@ import { useApiResource } from '../hooks/useApiResource';
 interface HandoffData { keywords: string[]; }
 
 export function HandoffPanel() {
-  const { data, loading, saving, saved, save } = useApiResource<HandoffData>('/cavem/api/admin/handoff');
+  const { data, loading, saving, saved, save } = useApiResource<HandoffData>('/intouch/api/admin/handoff');
   const [keywords, setKeywords] = useState<string[]>([]);
   const [nueva, setNueva] = useState('');
 

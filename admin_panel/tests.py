@@ -137,7 +137,7 @@ class ChatEndpointsTest(TestCase):
         )
         resp = self.client.get(f"/demo/api/messages/{self.conv.pk}")
         item = next(i for i in resp.json()["items"] if i["id"] == m.pk)
-        self.assertEqual(item["media_url"], f"/cavem/api/media/{m.pk}")
+        self.assertEqual(item["media_url"], f"/intouch/api/media/{m.pk}")
         self.assertEqual(item["media_type"], "image")
 
     def test_mensaje_con_audio_expone_tipo_audio(self):

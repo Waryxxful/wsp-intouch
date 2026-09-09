@@ -36,7 +36,7 @@ export function EncuestasPanel() {
     setError('');
     setResultado(null);
     try {
-      const data = await apiFetch<EnvioResultado>('/cavem/api/admin/encuestas/enviar-masivo', {
+      const data = await apiFetch<EnvioResultado>('/intouch/api/admin/encuestas/enviar-masivo', {
         method: 'POST',
         body: JSON.stringify({ campaign_type: campaignType, csv_text: csvText }),
       });

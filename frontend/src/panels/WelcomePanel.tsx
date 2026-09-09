@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 interface WelcomeData { message: string; }
 
 export function WelcomePanel() {
-  const { data, loading, saving, saved, save } = useApiResource<WelcomeData>('/cavem/api/admin/welcome');
+  const { data, loading, saving, saved, save } = useApiResource<WelcomeData>('/intouch/api/admin/welcome');
   const [message, setMessage] = useState('');
 
   useEffect(() => { if (data) setMessage(data.message); }, [data]);

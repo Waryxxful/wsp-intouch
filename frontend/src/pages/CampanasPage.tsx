@@ -54,7 +54,7 @@ export function CampanasPage() {
     const params = new URLSearchParams();
     if (modoDemo) params.set('modo', 'demo');
     setLoading(true);
-    apiFetch<Campana[]>(`/cavem/api/admin/campanas?${params}`)
+    apiFetch<Campana[]>(`/intouch/api/admin/campanas?${params}`)
       .then(setCampanas)
       .catch(err => setError(err.message || 'No se pudieron cargar las campañas.'))
       .finally(() => setLoading(false));
@@ -69,7 +69,7 @@ export function CampanasPage() {
     setResultado('');
     try {
       const r = await apiFetch<{ enviados: number; optout_saltados: number; errores: string[] }>(
-        '/cavem/api/admin/campanas/enviar',
+        '/intouch/api/admin/campanas/enviar',
         { method: 'POST', body: JSON.stringify({ campaign_type: enviando.campaign_type, csv_text: csv }) },
       );
       const partes = [`${r.enviados} enviados`];
@@ -101,7 +101,7 @@ export function CampanasPage() {
           Desactivá “Proyección demo” para ver los datos efectivos.
         </Alert>
       )}
-      <PageHeader title="Campañas" breadcrumbs={[{ label: 'Auto IA', href: '.' }, { label: 'Campañas' }]}>
+      <PageHeader title="Campañas" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Campañas' }]}>
         <div className="form-check form-switch me-3">
           <input
             className="form-check-input"

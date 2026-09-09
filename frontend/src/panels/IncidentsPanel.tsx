@@ -33,7 +33,7 @@ export function IncidentsPanel({ conversationId, open, onClose, onChanged }: {
 
   const load = () => {
     setLoading(true);
-    apiFetch<{ items: Incident[] }>(`/cavem/api/conversations/${conversationId}/incidents`)
+    apiFetch<{ items: Incident[] }>(`/intouch/api/conversations/${conversationId}/incidents`)
       .then(data => setItems(data.items))
       .finally(() => setLoading(false));
   };
@@ -45,7 +45,7 @@ export function IncidentsPanel({ conversationId, open, onClose, onChanged }: {
 
   const updateStatus = (id: number, status: Incident['status']) => {
     setUpdatingId(id);
-    apiFetch(`/cavem/api/incidents/${id}/status`, {
+    apiFetch(`/intouch/api/incidents/${id}/status`, {
       method: 'POST',
       body: JSON.stringify({ status }),
     })

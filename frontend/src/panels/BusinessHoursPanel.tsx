@@ -8,7 +8,7 @@ interface BusinessHoursData { dias: Dia[]; }
 const DIA_LABELS = ['Lunes', 'Martes', 'Miércoles', 'Jueves', 'Viernes', 'Sábado', 'Domingo'];
 
 export function BusinessHoursPanel() {
-  const { data, loading, saving, saved, save } = useApiResource<BusinessHoursData>('/cavem/api/admin/business-hours');
+  const { data, loading, saving, saved, save } = useApiResource<BusinessHoursData>('/intouch/api/admin/business-hours');
   const [dias, setDias] = useState<Dia[]>([]);
 
   useEffect(() => { if (data) setDias(data.dias); }, [data]);

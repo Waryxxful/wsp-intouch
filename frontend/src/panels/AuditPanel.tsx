@@ -11,7 +11,7 @@ export function AuditPanel() {
   const [loading, setLoading] = useState(true);
 
   useEffect(() => {
-    apiFetch<AuditEntry[]>('/cavem/api/admin/audit').then(setLogs).catch(console.error).finally(() => setLoading(false));
+    apiFetch<AuditEntry[]>('/intouch/api/admin/audit').then(setLogs).catch(console.error).finally(() => setLoading(false));
   }, []);
 
   if (loading) return <LoadingState />;

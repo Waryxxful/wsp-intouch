@@ -15,9 +15,12 @@ import { CampanasPage } from './pages/CampanasPage';
 import { AgendamientosPage } from './pages/AgendamientosPage';
 
 export default function App({ session, bus, basename }: GranCrmRemoteProps) {
-  // El host pasa apiBase='/cavem/api' via el contract, pero los components
-  // usan paths absolutos /cavem/api/... directamente — no llamamos
+  // El host pasa apiBase='/intouch/api' via el contract, pero los components
+  // usan paths absolutos /intouch/api/... directamente — no llamamos
   // configureApi() para no generar doble prefijo (mismo patron que pompeyo).
+  // Deuda pendiente: unificar los ~26 archivos de frontend/src que hardcodean
+  // ese path absoluto para que lean el `apiBase` del contract en su lugar --
+  // no se hizo ahora por ser un refactor amplio sin cobertura de tests.
   useEffect(() => {
     const handler = () => bus.emit('sessionExpired');
     window.addEventListener('grancrm:sessionExpired', handler);

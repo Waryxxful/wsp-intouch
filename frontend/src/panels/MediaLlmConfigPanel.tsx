@@ -18,7 +18,7 @@ export function MediaLlmConfigPanel() {
   const [error, setError] = useState('');
 
   const load = () =>
-    apiFetch<MediaLlmConfig>('/cavem/api/admin/media-llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
+    apiFetch<MediaLlmConfig>('/intouch/api/admin/media-llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
@@ -26,7 +26,7 @@ export function MediaLlmConfigPanel() {
     setSaving(true);
     setError('');
     let ok = true;
-    await apiFetch('/cavem/api/admin/media-llm-config', { method: 'POST', body: JSON.stringify({ model }) })
+    await apiFetch('/intouch/api/admin/media-llm-config', { method: 'POST', body: JSON.stringify({ model }) })
       .catch(err => { ok = false; console.error(err); });
     await load();
     if (ok) { setSaved('Modelo guardado'); setTimeout(() => setSaved(''), 2000); }

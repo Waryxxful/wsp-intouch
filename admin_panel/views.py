@@ -258,7 +258,7 @@ def _media_url_y_tipo(m: Message) -> tuple[str | None, str | None]:
         return None, None
     extension = m.media_url.rsplit(".", 1)[-1].lower()
     tipo = "image" if extension in _EXTENSIONES_IMAGEN else "audio"
-    return f"/cavem/api/media/{m.pk}", tipo
+    return f"/intouch/api/media/{m.pk}", tipo
 
 
 @login_required

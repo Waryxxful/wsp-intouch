@@ -5,7 +5,7 @@ import { useApiList } from '../hooks/useApiList';
 interface QuickResponse { id: number; pattern: string; response: string; priority: number; }
 
 export function QuickResponsesPanel() {
-  const { items, loading, saving, create, update, remove } = useApiList<QuickResponse>('/cavem/api/admin/quick-responses');
+  const { items, loading, saving, create, update, remove } = useApiList<QuickResponse>('/intouch/api/admin/quick-responses');
   const [pattern, setPattern] = useState('');
   const [response, setResponse] = useState('');
   const [priority, setPriority] = useState(0);

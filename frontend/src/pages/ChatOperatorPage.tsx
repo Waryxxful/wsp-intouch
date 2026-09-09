@@ -137,7 +137,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
     if (dateDesde) params.set('desde', dateDesde);
     if (dateHasta) params.set('hasta', dateHasta);
     if (modoDemo) params.set('modo', 'demo');
-    return apiFetch<{ items: Conversation[]; count: number }>(`/cavem/api/conversations?${params.toString()}`)
+    return apiFetch<{ items: Conversation[]; count: number }>(`/intouch/api/conversations?${params.toString()}`)
       .then(d => { setConvs(d.items); setCount(d.count); })
       .catch(console.error);
   };
@@ -155,7 +155,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   // Trae la ultima pagina (mas reciente) y la reemplaza -- uso inicial al
   // abrir una conversacion.
   const loadInitialMessages = (id: number) =>
-    apiFetch<MessagesPage>(`/cavem/api/messages/${id}${queryDemo}`).then(d => {
+    apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`).then(d => {
       setMessages(d.items);
       setHasMoreOlder(d.has_more);
     }).catch(console.error);
@@ -164,7 +164,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   // descartar el historial anterior que el operador pudo haber cargado
   // scrolleando hacia arriba.
   const loadMessages = (id: number) =>
-    apiFetch<MessagesPage>(`/cavem/api/messages/${id}${queryDemo}`).then(d => {
+    apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`).then(d => {
       setMessages(prev => mergeNewer(prev, d.items));
     }).catch(console.error);
 
@@ -174,7 +174,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
     const el = messagesContainer.current;
     setLoadingOlder(true);
     try {
-      const d = await apiFetch<MessagesPage>(`/cavem/api/messages/${activeId}?before_id=${oldestId}`);
+      const d = await apiFetch<MessagesPage>(`/intouch/api/messages/${activeId}?before_id=${oldestId}`);
       if (el) prevScrollHeight.current = el.scrollHeight;
       setMessages(prev => {
         const known = new Set(prev.map(m => m.id));
@@ -189,7 +189,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   };
 
   const loadDirectConv = (id: number) =>
-    apiFetch<Conversation>(`/cavem/api/conversations/${id}`).then(setDirectConv).catch(() => setDirectConv(null));
+    apiFetch<Conversation>(`/intouch/api/conversations/${id}`).then(setDirectConv).catch(() => setDirectConv(null));
 
   useEffect(() => {
     loadConvs();
@@ -259,7 +259,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
 
   const send = async (t: string) => {
     if (activeId == null || modoDemo) return;
-    await apiFetch('/cavem/api/admin/send-message', {
+    await apiFetch('/intouch/api/admin/send-message', {
       method: 'POST', body: JSON.stringify({ conversation_id: activeId, text: t }),
     }).catch(console.error);
     await loadMessages(activeId);
@@ -281,7 +281,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   const toggleHumanMode = async () => {
     if (activeId == null || togglingMode || !activeConv) return;
     setTogglingMode(true);
-    await apiFetch(`/cavem/api/conversations/${activeId}/mode`, {
+    await apiFetch(`/intouch/api/conversations/${activeId}/mode`, {
       method: 'POST', body: JSON.stringify({ human_mode: !activeConv.human_mode }),
     }).catch(console.error);
     // loadConvs() sola no alcanza cuando activeConv viene de directConv (la
@@ -295,7 +295,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   const toggleArchive = async () => {
     if (activeId == null || archiving || !activeConv) return;
     setArchiving(true);
-    await apiFetch(`/cavem/api/conversations/${activeId}/archive`, {
+    await apiFetch(`/intouch/api/conversations/${activeId}/archive`, {
       method: 'POST', body: JSON.stringify({ archived: !activeConv.archived }),
     }).catch(console.error);
     await Promise.all([loadConvs(), loadDirectConv(activeId)]);

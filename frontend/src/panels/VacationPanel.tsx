@@ -5,7 +5,7 @@ import { useState, useEffect } from 'react';
 interface VacationData { message: string; }
 
 export function VacationPanel() {
-  const { data, loading, saving, saved, save } = useApiResource<VacationData>('/cavem/api/admin/vacation');
+  const { data, loading, saving, saved, save } = useApiResource<VacationData>('/intouch/api/admin/vacation');
   const [message, setMessage] = useState('');
 
   useEffect(() => { if (data) setMessage(data.message); }, [data]);

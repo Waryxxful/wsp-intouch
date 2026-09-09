@@ -5,7 +5,7 @@ import { useApiList } from '../hooks/useApiList';
 interface Snippet { id: number; nombre: string; texto: string; }
 
 export function SnippetsPanel() {
-  const { items, loading, saving, create, update, remove } = useApiList<Snippet>('/cavem/api/admin/snippets');
+  const { items, loading, saving, create, update, remove } = useApiList<Snippet>('/intouch/api/admin/snippets');
   const [nombre, setNombre] = useState('');
   const [texto, setTexto] = useState('');
   const [editingId, setEditingId] = useState<number | null>(null);

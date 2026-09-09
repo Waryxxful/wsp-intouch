@@ -17,7 +17,7 @@ interface EscenarioDePrueba {
 const ESCENARIO_VACIO = { nombre: '', persona: '', objetivo: '', criterios: '', fuente: '', max_turns: 12 };
 
 function EscenariosView({ onTriggered }: { onTriggered: () => void }) {
-  const { items, loading, saving, error, create, update, remove } = useApiList<EscenarioDePrueba>('/cavem/api/admin/test-scenarios');
+  const { items, loading, saving, error, create, update, remove } = useApiList<EscenarioDePrueba>('/intouch/api/admin/test-scenarios');
   const [modalOpen, setModalOpen] = useState(false);
   const [editing, setEditing] = useState<EscenarioDePrueba | null>(null);
   const [form, setForm] = useState(ESCENARIO_VACIO);
@@ -60,7 +60,7 @@ function EscenariosView({ onTriggered }: { onTriggered: () => void }) {
     setRunError('');
     setTriggering(nombreEscenario || 'todos');
     try {
-      await apiFetch('/cavem/api/admin/test-runs/trigger', {
+      await apiFetch('/intouch/api/admin/test-runs/trigger', {
         method: 'POST', body: JSON.stringify({ nombre_escenario: nombreEscenario || null }),
       });
       onTriggered();
@@ -187,7 +187,7 @@ function CorridaDetalleModal({ id, onClose }: { id: number; onClose: () => void 
     let activo = true;
     let intervalId: ReturnType<typeof setInterval> | undefined;
     const tick = async () => {
-      const data = await apiFetch<CorridaDetalle>(`/cavem/api/admin/test-runs/${id}`).catch(() => null);
+      const data = await apiFetch<CorridaDetalle>(`/intouch/api/admin/test-runs/${id}`).catch(() => null);
       if (!activo || !data) return;
       setDetalle(data);
       if (data.estado !== 'corriendo' && intervalId) clearInterval(intervalId);
@@ -240,7 +240,7 @@ function HistorialView() {
   useEffect(() => {
     let activo = true;
     let intervalId: ReturnType<typeof setInterval> | undefined;
-    const tick = () => apiFetch<CorridaResumen[]>('/cavem/api/admin/test-runs')
+    const tick = () => apiFetch<CorridaResumen[]>('/intouch/api/admin/test-runs')
       .then(data => {
         if (!activo) return;
         setCorridas(data);

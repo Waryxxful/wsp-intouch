@@ -22,7 +22,7 @@ export function LlmConfigPanel() {
   const [error, setError] = useState('');
 
   const load = () =>
-    apiFetch<LlmConfig>('/cavem/api/admin/llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
+    apiFetch<LlmConfig>('/intouch/api/admin/llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
@@ -34,7 +34,7 @@ export function LlmConfigPanel() {
     setSaving(true);
     setError('');
     let ok = true;
-    await apiFetch('/cavem/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ model }) })
+    await apiFetch('/intouch/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ model }) })
       .catch(err => { ok = false; console.error(err); });
     await load();
     if (ok) { setSaved('Modelo guardado'); setTimeout(() => setSaved(''), 2000); }
@@ -47,7 +47,7 @@ export function LlmConfigPanel() {
     setSaving(true);
     setError('');
     let ok = true;
-    await apiFetch('/cavem/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ api_key: apiKey }) })
+    await apiFetch('/intouch/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ api_key: apiKey }) })
       .catch(err => { ok = false; console.error(err); });
     setApiKey('');
     await load();
@@ -60,7 +60,7 @@ export function LlmConfigPanel() {
     setSaving(true);
     setError('');
     let ok = true;
-    await apiFetch('/cavem/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ action: 'clear_key' }) })
+    await apiFetch('/intouch/api/admin/llm-config', { method: 'POST', body: JSON.stringify({ action: 'clear_key' }) })
       .catch(err => { ok = false; console.error(err); });
     await load();
     if (ok) { setSaved('API key removida (usa env)'); setTimeout(() => setSaved(''), 2000); }

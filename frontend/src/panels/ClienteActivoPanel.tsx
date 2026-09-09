@@ -22,7 +22,7 @@ export function ClienteActivoPanel() {
   const [error, setError] = useState('');
 
   const load = () =>
-    apiFetch<Estado>('/cavem/api/admin/cliente-activo').then(setEstado).catch(e => setError(e.message));
+    apiFetch<Estado>('/intouch/api/admin/cliente-activo').then(setEstado).catch(e => setError(e.message));
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
@@ -31,7 +31,7 @@ export function ClienteActivoPanel() {
     setFlipping(true);
     setError('');
     try {
-      await apiFetch('/cavem/api/admin/cliente-activo', {
+      await apiFetch('/intouch/api/admin/cliente-activo', {
         method: 'POST', body: JSON.stringify({ target: confirmar }),
       });
       setConfirmar(null);

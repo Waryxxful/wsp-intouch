@@ -5,7 +5,7 @@ import { useApiList } from '../hooks/useApiList';
 interface Filtro { id: number; wa_id: string; tipo: 'block' | 'allow'; }
 
 export function FiltersPanel() {
-  const { items, loading, saving, create, remove } = useApiList<Filtro>('/cavem/api/admin/filters');
+  const { items, loading, saving, create, remove } = useApiList<Filtro>('/intouch/api/admin/filters');
   const [waId, setWaId] = useState('');
   const [tipo, setTipo] = useState<'block' | 'allow'>('block');
 

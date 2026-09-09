@@ -8,13 +8,13 @@ export function BotStatePanel() {
   const [saving, setSaving] = useState(false);
 
   const load = () =>
-    apiFetch<{ active: boolean }>('/cavem/api/admin/bot-state').then(d => setActive(d.active)).catch(console.error);
+    apiFetch<{ active: boolean }>('/intouch/api/admin/bot-state').then(d => setActive(d.active)).catch(console.error);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
   const toggle = async () => {
     setSaving(true);
-    await apiFetch('/cavem/api/admin/bot-state', {
+    await apiFetch('/intouch/api/admin/bot-state', {
       method: 'POST', body: JSON.stringify({ active: !active }),
     }).catch(console.error);
     // Re-fetch en vez de invertir el estado a ciegas: si el POST fallo (sesion

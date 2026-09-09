@@ -19,7 +19,7 @@ export function ScrapingLlmConfigPanel() {
   const [error, setError] = useState('');
 
   const load = () =>
-    apiFetch<ScrapingLlmConfig>('/cavem/api/admin/scraping-llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
+    apiFetch<ScrapingLlmConfig>('/intouch/api/admin/scraping-llm-config').then(d => { setData(d); setModel(d.model_override); }).catch(console.error);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
@@ -27,7 +27,7 @@ export function ScrapingLlmConfigPanel() {
     setSaving(true);
     setError('');
     let ok = true;
-    await apiFetch('/cavem/api/admin/scraping-llm-config', { method: 'POST', body: JSON.stringify({ model }) })
+    await apiFetch('/intouch/api/admin/scraping-llm-config', { method: 'POST', body: JSON.stringify({ model }) })
       .catch(err => { ok = false; console.error(err); });
     await load();
     if (ok) { setSaved('Modelo guardado'); setTimeout(() => setSaved(''), 2000); }

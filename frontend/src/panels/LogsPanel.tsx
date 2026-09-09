@@ -11,7 +11,7 @@ export function LogsPanel() {
   const [logs, setLogs] = useState<LogEntry[]>([]);
   const [loading, setLoading] = useState(true);
 
-  const load = () => apiFetch<LogEntry[]>('/cavem/api/admin/logs').then(setLogs).catch(console.error);
+  const load = () => apiFetch<LogEntry[]>('/intouch/api/admin/logs').then(setLogs).catch(console.error);
 
   useEffect(() => { load().finally(() => setLoading(false)); }, []);
 
@@ -21,7 +21,7 @@ export function LogsPanel() {
     <Card
       title="Logs de conversación"
       actions={
-        <Button variant="light-brand" size="sm" icon="feather-download" onClick={() => { window.location.href = apiUrl('/cavem/api/admin/logs/export'); }}>
+        <Button variant="light-brand" size="sm" icon="feather-download" onClick={() => { window.location.href = apiUrl('/intouch/api/admin/logs/export'); }}>
           Exportar CSV
         </Button>
       }

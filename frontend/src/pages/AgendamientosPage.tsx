@@ -40,7 +40,7 @@ export function AgendamientosPage() {
     if (modoDemo) params.set('modo', 'demo');
     setLoading(true);
     setError('');
-    apiFetch<Reserva[]>(`/cavem/api/admin/reservas?${params}`)
+    apiFetch<Reserva[]>(`/intouch/api/admin/reservas?${params}`)
       .then(setReservas)
       .catch(err => setError(err.message || 'No se pudieron cargar los agendamientos.'))
       .finally(() => setLoading(false));
@@ -102,7 +102,7 @@ export function AgendamientosPage() {
           Desactivá “Proyección demo” para ver los datos efectivos.
         </Alert>
       )}
-      <PageHeader title="Agendamientos" breadcrumbs={[{ label: 'Auto IA', href: '.' }, { label: 'Agendamientos' }]}>
+      <PageHeader title="Agendamientos" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Agendamientos' }]}>
         <div className="form-check form-switch me-3">
           <input
             className="form-check-input"

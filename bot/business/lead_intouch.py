@@ -17,7 +17,7 @@ import re
 from django.conf import settings
 from django.utils import timezone
 
-from bot.models import Conversation, LeadInTouch, SenalesLead, calcular_lead_score
+from bot.models import Conversation, LeadInTouch, SenalesLead, calcular_score_intouch
 
 logger = logging.getLogger(__name__)
 
@@ -138,7 +138,7 @@ def _registrar_lead_impl(wa_id: str, datos: dict, senales=None) -> dict:
     score_previo = lead.lead_score
     convertidas = _senales_desde(senales)
     if convertidas is not None:
-        lead.lead_score = calcular_lead_score(convertidas)
+        lead.lead_score = calcular_score_intouch(convertidas)
 
     # Se notifica en la TRANSICIÓN a HOT y se sella con `notificado_en`. Sin el
     # sello, el equipo comercial recibiría una notificación por cada mensaje que

@@ -941,7 +941,7 @@ class LeadInTouch(models.Model):
     El teléfono NO es un campo: llega de los metadatos de WhatsApp y vive en
     Conversation.wa_id. El prompt prohíbe pedírselo al contacto.
 
-    `lead_score` lo escribe `calcular_lead_score` (código), nunca el LLM.
+    `lead_score` lo escribe `calcular_score_intouch` (código), nunca el LLM.
     """
 
     SCORE_CHOICES = [("HOT", "HOT"), ("WARM", "WARM"), ("COLD", "COLD"),
@@ -1034,7 +1034,7 @@ class SenalesLead:
     """Lo que el extractor observa en la conversación.
 
     Son señales verificables, no un veredicto: el extractor dice qué pasó y
-    `calcular_lead_score` decide qué significa. Ver spec §7.3.
+    `calcular_score_intouch` decide qué significa. Ver spec §7.3.
     """
     encaje_con_oferta: bool = False
     necesidad_concreta: bool = False
@@ -1045,9 +1045,19 @@ class SenalesLead:
     interes_exploratorio: bool = False
 
 
-def calcular_lead_score(senales: SenalesLead) -> str:
+def calcular_score_intouch(senales: SenalesLead) -> str:
     """La precedencia del prompt §6: HOT, luego WARM, luego COLD, si no
     NO_CALIFICADO.
+
+    EL NOMBRE LLEVA EL SUFIJO A PROPÓSITO: `calcular_lead_score` (más arriba en
+    este mismo módulo) ya existe para el lead automotriz heredado -- recibe un
+    `LeadComercial` y devuelve un entero 0-100. Cuando esta función se llamaba
+    igual, la definición de abajo TAPABA a la de arriba y
+    `bot/business/prospeccion.py` reventaba con
+    `AttributeError: 'LeadComercial' object has no attribute 'encaje_con_oferta'`
+    dentro de la tool. El dominio heredado se conserva desregistrado porque su
+    cobertura prueba defensas reales de este stack, así que los dos veredictos
+    conviven y cada uno necesita un nombre inequívoco.
 
     Se calcula acá y no en el prompt porque el resultado tiene que ser
     reproducible: el mismo lead no puede salir HOT o WARM según el humor del

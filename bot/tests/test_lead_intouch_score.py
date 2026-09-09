@@ -2,14 +2,14 @@
 
 Motivo: es reproducible y auditable. Cuando alguien pregunte "y de dónde sale
 que este lead es HOT", la respuesta es esta función y no el humor del modelo en
-ese turno. Mismo criterio que `calcular_lead_score` de Cavem.
+ese turno. Mismo criterio que `calcular_score_intouch` de Cavem.
 
 La precedencia es la del prompt §6, en ese orden: HOT, luego WARM, luego COLD,
 si no NO_CALIFICADO.
 """
 from django.test import SimpleTestCase, TestCase
 
-from bot.models import Conversation, LeadInTouch, SenalesLead, calcular_lead_score
+from bot.models import Conversation, LeadInTouch, SenalesLead, calcular_score_intouch
 
 
 class PrecedenciaDelScoreTest(SimpleTestCase):
@@ -18,14 +18,14 @@ class PrecedenciaDelScoreTest(SimpleTestCase):
             encaje_con_oferta=True, necesidad_concreta=True,
             solicita_siguiente_paso=True, intencion_avanzar_declarada=True,
         )
-        self.assertEqual(calcular_lead_score(senales), "HOT")
+        self.assertEqual(calcular_score_intouch(senales), "HOT")
 
     def test_hot_tambien_con_plazo_cercano_en_vez_de_intencion(self):
         senales = SenalesLead(
             encaje_con_oferta=True, necesidad_concreta=True,
             solicita_siguiente_paso=True, plazo_cercano_declarado=True,
         )
-        self.assertEqual(calcular_lead_score(senales), "HOT")
+        self.assertEqual(calcular_score_intouch(senales), "HOT")
 
     def test_pedir_reunion_sin_intencion_ni_plazo_no_es_hot(self):
         # El prompt §6 pide las dos cosas para HOT: pidió un siguiente paso Y
@@ -34,17 +34,17 @@ class PrecedenciaDelScoreTest(SimpleTestCase):
             encaje_con_oferta=True, necesidad_concreta=True,
             solicita_siguiente_paso=True, interes_evaluar=True,
         )
-        self.assertEqual(calcular_lead_score(senales), "WARM")
+        self.assertEqual(calcular_score_intouch(senales), "WARM")
 
     def test_warm_es_necesidad_concreta_con_interes_en_evaluar(self):
         senales = SenalesLead(
             encaje_con_oferta=True, necesidad_concreta=True, interes_evaluar=True,
         )
-        self.assertEqual(calcular_lead_score(senales), "WARM")
+        self.assertEqual(calcular_score_intouch(senales), "WARM")
 
     def test_cold_es_interes_exploratorio_sin_necesidad_concreta(self):
         senales = SenalesLead(encaje_con_oferta=True, interes_exploratorio=True)
-        self.assertEqual(calcular_lead_score(senales), "COLD")
+        self.assertEqual(calcular_score_intouch(senales), "COLD")
 
     def test_sin_encaje_con_la_oferta_no_califica_aunque_haya_urgencia(self):
         # Prompt §6: "o la necesidad conocida no encaja con la oferta". Alguien
@@ -53,15 +53,15 @@ class PrecedenciaDelScoreTest(SimpleTestCase):
             encaje_con_oferta=False, necesidad_concreta=True,
             solicita_siguiente_paso=True, intencion_avanzar_declarada=True,
         )
-        self.assertEqual(calcular_lead_score(senales), "NO_CALIFICADO")
+        self.assertEqual(calcular_score_intouch(senales), "NO_CALIFICADO")
 
     def test_sin_ninguna_senal_no_califica(self):
-        self.assertEqual(calcular_lead_score(SenalesLead()), "NO_CALIFICADO")
+        self.assertEqual(calcular_score_intouch(SenalesLead()), "NO_CALIFICADO")
 
     def test_es_reproducible(self):
         senales = SenalesLead(encaje_con_oferta=True, interes_exploratorio=True)
         self.assertEqual(
-            {calcular_lead_score(senales) for _ in range(20)}, {"COLD"},
+            {calcular_score_intouch(senales) for _ in range(20)}, {"COLD"},
         )
 
 

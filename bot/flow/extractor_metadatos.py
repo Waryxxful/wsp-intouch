@@ -78,7 +78,7 @@ _MAX_REINTENTOS = 2
 # pierde en silencio. Hay un test que ancla la correspondencia.
 #
 # `lead_score` NO se le pide al modelo (spec §7.3): lo calcula
-# `calcular_lead_score` desde las señales de abajo. Pedírselo además sería
+# `calcular_score_intouch` desde las señales de abajo. Pedírselo además sería
 # tener dos escritores del mismo dato, y el del modelo no es reproducible.
 #
 # El teléfono tampoco: llega de los metadatos de WhatsApp y el prompt prohíbe

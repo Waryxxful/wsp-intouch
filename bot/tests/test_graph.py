@@ -1449,13 +1449,14 @@ class BusinessActionNodeConsultarBaseConocimientoTest(TransactionTestCase):
         mock_buscar.return_value = [chunk]
         mock_rerank.return_value = [chunk]
         tool_messages_previos = [AIMessage(content="", tool_calls=[
-            {"name": "consultar_base_conocimiento", "args": {"query": "garantia"}, "id": "call_1"},
+            {"name": "consultar_base_conocimiento", "args": {"query": "contact center"}, "id": "call_1"},
         ])]
         with patch("bot.flow.graph.build_agent_registry", return_value={"faq": self._AgenteDePrueba()}):
             result = asyncio.run(business_action_node(self._state(tool_messages_previos)))
         contenido = json.loads(result["tool_messages"][-1].content)
         self.assertTrue(contenido["ok"])
-        self.assertEqual(contenido["resultados"][0]["texto"], "la garantia es de 3 anios")
+        self.assertEqual(contenido["resultados"][0]["texto"],
+                         "el Contact Center se opera en modalidad hibrida")
         self.assertEqual(contenido["resultados"][0]["categoria"], "modelos_operacion")
 
     @patch("bot.rag.tool._rerankear", new_callable=AsyncMock)

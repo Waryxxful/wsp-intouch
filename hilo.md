@@ -168,7 +168,8 @@ Lo que hay que anotar acá es lo que nadie va a poder reconstruir después.
 
 | Qué | Valor | Cuándo se midió |
 |---|---|---|
-| Suite completa | **1.763 tests, 11 fallas, 13 skipped** | al cierre, árbol quieto |
+| Suite completa | **1.852 tests, 0 fallas, 13 skipped** | al cierre real, medido de la corrida |
+| Suite antes de cerrar los tests huérfanos | 1.763 tests, 11 fallas — y ocultaba 79 tests tras un `ImportError` | mitad de sesión |
 | Línea base heredada al copiar el árbol | 8 fallas ERROR, 4 causas identificadas | Task 1 |
 | `test_graph` tras reescribir `AGENTS` | 117 tests, OK — las 9 defensas conservadas | commit `cd37db3` |
 | `admin_panel` | 261 tests, OK (255 previos + 6 del panel de leads) | Task 18 |

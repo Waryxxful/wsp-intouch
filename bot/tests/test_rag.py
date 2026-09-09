@@ -269,7 +269,7 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         mock_cliente = MagicMock()
         mock_get_client.return_value = mock_cliente
         mock_get_llm.return_value = MagicMock()
-        mock_ainvoke.return_value = "garantia"
+        mock_ainvoke.return_value = "soluciones"
 
         pagina = self._pagina_fake_con_secciones([{"titulo": "Garantia", "texto": "Dura 36 meses."}])
         from bot.rag.indexador import indexar_pagina_en_supabase
@@ -280,7 +280,7 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         # solo para el modelo de embeddings (ver test_el_contenido_almacenado_...
         # y test_el_texto_embebido_incluye_la_categoria_ya_clasificada mas abajo).
         self.assertEqual(filas[0]["contenido"], "Garantia\n\nDura 36 meses.")
-        self.assertEqual(filas[0]["categoria"], "garantia")
+        self.assertEqual(filas[0]["categoria"], "soluciones")
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
     @patch("bot.rag.cliente.get_supabase_client")
@@ -295,11 +295,11 @@ class IndexarPaginaEnSupabaseTest(TestCase):
 
         from bot.rag.indexador import indexar_pagina_en_supabase
         with patch("bot.scraping.extractor._ainvoke_with_retry", new_callable=AsyncMock) as mock_retry:
-            mock_retry.return_value = "garantia"
+            mock_retry.return_value = "soluciones"
             indexar_pagina_en_supabase(pagina, cliente="renault")
 
         textos_embebidos = mock_embeddings.embed_documents.call_args[0][0]
-        self.assertTrue(textos_embebidos[0].startswith("[garantia]"))
+        self.assertTrue(textos_embebidos[0].startswith("[soluciones]"))
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
     @patch("bot.rag.cliente.get_supabase_client")
@@ -320,15 +320,15 @@ class IndexarPaginaEnSupabaseTest(TestCase):
 
         from bot.rag.indexador import indexar_pagina_en_supabase
         with patch("bot.scraping.extractor._ainvoke_with_retry", new_callable=AsyncMock) as mock_retry:
-            mock_retry.return_value = "garantia"
+            mock_retry.return_value = "soluciones"
             indexar_pagina_en_supabase(pagina, cliente="renault")
 
         filas = mock_cliente.table.return_value.insert.call_args[0][0]
         self.assertEqual(filas[0]["contenido"], "Garantia\n\n36 meses de cobertura")
-        self.assertNotIn("[garantia]", filas[0]["contenido"])
+        self.assertNotIn("[soluciones]", filas[0]["contenido"])
         # pero el embedding SI se calculo sobre el texto con el tag
         textos_embebidos = mock_embeddings.embed_documents.call_args[0][0]
-        self.assertTrue(textos_embebidos[0].startswith("[garantia]"))
+        self.assertTrue(textos_embebidos[0].startswith("[soluciones]"))
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
     @patch("bot.scraping.extractor._ainvoke_with_retry", new_callable=AsyncMock)
@@ -389,7 +389,7 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         mock_cliente = MagicMock()
         mock_get_client.return_value = mock_cliente
         mock_get_llm.return_value = MagicMock()
-        mock_ainvoke.side_effect = [RuntimeError("agotados los reintentos"), "sucursales"]
+        mock_ainvoke.side_effect = [RuntimeError("agotados los reintentos"), "canales"]
 
         pagina = self._pagina_fake_con_secciones([
             {"titulo": "Garantia", "texto": "Dura 36 meses."},
@@ -400,9 +400,9 @@ class IndexarPaginaEnSupabaseTest(TestCase):
             resultado = indexar_pagina_en_supabase(pagina, cliente="renault")
 
         filas = mock_cliente.table.return_value.insert.call_args[0][0]
-        self.assertEqual({f["categoria"] for f in filas}, {"otro", "sucursales"})
+        self.assertEqual({f["categoria"] for f in filas}, {"otro", "canales"})
         fila_fallo = next(f for f in filas if f["categoria"] == "otro")
-        fila_ok = next(f for f in filas if f["categoria"] == "sucursales")
+        fila_ok = next(f for f in filas if f["categoria"] == "canales")
         self.assertTrue(fila_fallo["clasificacion_fallo"])
         self.assertFalse(fila_ok["clasificacion_fallo"])
         self.assertIn("fallo al clasificar", "\n".join(logs.output))
@@ -818,8 +818,8 @@ class HechosDeDocumentoTest(TestCase):
         mock_get_llm.return_value = MagicMock()
         mock_ainvoke.return_value = json.dumps({
             "hechos": [
-                {"texto": "Renault Koleos: 7 bolsas de aire.", "categoria": "vehiculo_specs"},
-                {"texto": "Renault Koleos: precio desde $27.990.000.", "categoria": "precio_financiamiento"},
+                {"texto": "InTouch: analítica conversacional con dashboards en Power BI.", "categoria": "analitica"},
+                {"texto": "InTouch: atención por WhatsApp, voz, chat y correo.", "categoria": "canales"},
             ]
         })
 
@@ -827,8 +827,11 @@ class HechosDeDocumentoTest(TestCase):
         resultado = asyncio.run(_hechos_de_documento("texto crudo del pdf"))
 
         self.assertEqual(len(resultado), 2)
-        self.assertEqual(resultado[0], {"texto": "Renault Koleos: 7 bolsas de aire.", "categoria": "vehiculo_specs"})
-        self.assertEqual(resultado[1]["categoria"], "precio_financiamiento")
+        self.assertEqual(
+            resultado[0],
+            {"texto": "InTouch: analítica conversacional con dashboards en Power BI.", "categoria": "analitica"},
+        )
+        self.assertEqual(resultado[1]["categoria"], "canales")
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
     @patch("bot.scraping.extractor._ainvoke_with_retry", new_callable=AsyncMock)
@@ -836,7 +839,7 @@ class HechosDeDocumentoTest(TestCase):
         mock_get_llm.return_value = MagicMock()
         mock_ainvoke.return_value = json.dumps({
             "hechos": [
-                {"texto": "hecho valido", "categoria": "vehiculo_specs"},
+                {"texto": "hecho valido", "categoria": "soluciones"},
                 {"texto": "hecho con categoria inventada", "categoria": "categoria_que_no_existe"},
             ]
         })
@@ -844,7 +847,7 @@ class HechosDeDocumentoTest(TestCase):
         from bot.rag.indexador import _hechos_de_documento
         resultado = asyncio.run(_hechos_de_documento("texto crudo"))
 
-        self.assertEqual(resultado[0]["categoria"], "vehiculo_specs")
+        self.assertEqual(resultado[0]["categoria"], "soluciones")
         self.assertEqual(resultado[1]["categoria"], "otro")
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)

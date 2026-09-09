@@ -74,14 +74,14 @@ async def _clasificar_chunk(llm, semaforo: asyncio.Semaphore, texto: str) -> str
         return raw if raw in CATEGORIAS_RAG else "otro"
 
 
-_PROMPT_HECHOS_DOCUMENTO = """Este es el texto extraido de un documento (ficha tecnica u otro archivo) de una concesionaria de autos. Puede tener columnas o tablas desordenadas por la extraccion automatica.
+_PROMPT_HECHOS_DOCUMENTO = """Este es el texto extraído de un documento (ficha técnica u otro archivo) de InTouch, una empresa que integra IA, personas, datos, automatización, operación de Contact Center y analítica de gestión para otras empresas. Puede tener columnas o tablas desordenadas por la extracción automática.
 
-Tu tarea: reescribir el contenido como una lista de HECHOS independientes, cada uno autocontenido (se entiende sin leer los demas). Reglas:
+Tu tarea: reescribir el contenido como una lista de HECHOS independientes, cada uno autocontenido (se entiende sin leer los demás). Reglas:
 
-- Cada hecho debe mencionar explicitamente el modelo/version/tema al que se refiere (ej. "Renault Koleos: 7 bolsas de aire..."), aunque el texto original no lo repita en cada linea -- inferilo del titulo/contexto del documento.
-- No inventes ni completes datos que no esten en el texto. Si un numero o dato esta en el original, se preserva literal.
-- Agrupa detalles muy relacionados en un mismo hecho (ej. el desglose de las bolsas de aire va junto), pero separa temas distintos (seguridad, dimensiones, motor, precio) en hechos distintos.
-- A cada hecho asignale UNA categoria de esta lista exacta: {categorias}
+- Cada hecho debe mencionar explícitamente la solución, canal, modelo de operación o tema al que se refiere (ej. "Analítica de InTouch: dashboards en Power BI con control de calidad..."), aunque el texto original no lo repita en cada línea -- inferilo del título/contexto del documento.
+- No inventes ni completes datos que no estén en el texto. Si un dato está en el original, se preserva literal.
+- Agrupa detalles muy relacionados en un mismo hecho (ej. los canales que cubre una misma solución van juntos), pero separa temas distintos (soluciones, modelos de operación, canales, analítica, integraciones, datos y seguridad) en hechos distintos.
+- A cada hecho asignale UNA categoría de esta lista exacta: {categorias}
 
 Texto:
 {texto}

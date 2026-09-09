@@ -295,5 +295,31 @@ async def _extract_catalog_async(paginas: list[dict]) -> dict:
 def extract_catalog(paginas: list[dict]) -> dict:
     """Entry point sincronico -- runner.py queda 100% sincronico de punta
     a punta, corra desde un thread (vista del panel) o desde el hilo
-    principal (management command)."""
+    principal (management command).
+
+    Guard bajo CLIENTE_ACTIVO="intouch" (el vertical real de este bot,
+    Task 11): levanta NotImplementedError ANTES de invocar al LLM.
+    EXTRACTOR_PROMPT ya no le pide al LLM el JSON de
+    servicios/sucursales/vehiculos -- pide hechos atomicos en prosa -- pero
+    _parsear_respuesta/_combinar_catalogos de mas abajo siguen esperando esa
+    forma vieja: adaptarla a B2B es trabajo de diseño propio, no un ajuste de
+    prompt (deuda declarada en
+    docs/superpowers/specs/2026-09-09-bot-intouch-comercial-design.md §12.6).
+    Sin este guard, quien configure una ScrapingSource para este bot se topa
+    con ValueError("el LLM no devolvio JSON valido"), que suena a falla del
+    proveedor cuando en realidad es "esto no esta implementado para este
+    vertical". El conocimiento de este bot entra por los .md de
+    bot/fixtures/rag/ via `manage.py cargar_conocimiento_rag`, no por
+    scraping estructurado. Los clientes automotrices heredados
+    (renault/astara/cavem, con los que corre la suite) no se ven afectados."""
+    if settings.CLIENTE_ACTIVO == "intouch":
+        raise NotImplementedError(
+            "el scraping estructurado (extract_catalog) no esta adaptado al "
+            "vertical de InTouch -- sigue devolviendo servicios/sucursales/"
+            "vehiculos, la forma heredada del negocio automotriz. El "
+            "conocimiento de este bot entra por los .md de "
+            "bot/fixtures/rag/ via 'manage.py cargar_conocimiento_rag', no "
+            "por scraping estructurado. Deuda anotada en "
+            "docs/superpowers/specs/2026-09-09-bot-intouch-comercial-design.md §12.6."
+        )
     return asyncio.run(_extract_catalog_async(paginas))

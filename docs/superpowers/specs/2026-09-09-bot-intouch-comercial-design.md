@@ -897,6 +897,24 @@ corre ahí adentro con un presupuesto de 35 s y retiene **el único** thread: la
 partes 2..N de los demás contactos esperan detrás. Con el volumen inicial de un
 bot B2B no duele; con 10 conversaciones simultáneas, sí.
 
+### 12.6 El scraping estructurado (`extract_catalog`) no está adaptado al vertical — MEDIO
+
+`bot/scraping/extractor.py::extract_catalog` sigue devolviendo un catálogo con
+forma `{"servicios", "sucursales", "vehiculos"}` — `_parsear_respuesta` y
+`_combinar_catalogos` no cambiaron con la Task 11 (que sólo tocó el texto de
+`EXTRACTOR_PROMPT`, que ahora pide hechos atómicos en prosa, no ese JSON).
+Adaptar esta pieza a B2B (¿"servicios" sí, "sucursales"/"vehiculos" no, o una
+forma nueva?) es trabajo de diseño propio, no un ajuste de prompt.
+
+No hace falta para esta entrega: `seed_intouch` no crea ninguna
+`ScrapingSource`, igual que en el resto del bot — el conocimiento entra por los
+`.md` de `bot/fixtures/rag/` vía `manage.py cargar_conocimiento_rag`
+(§`_hechos_de_documento`, no este extractor). Para que el hueco no se manifieste
+como un `ValueError("el LLM no devolvio JSON valido")` engañoso si alguien
+configura una `ScrapingSource` igual, `extract_catalog` levanta
+`NotImplementedError` explícito antes de invocar al LLM (ver
+`bot/tests/test_taxonomia_rag_intouch.py::ExtractCatalogNoImplementadoTest`).
+
 ---
 
 ## 13. Bloqueantes externos

@@ -78,22 +78,14 @@ class ExtractorEnLaColaTest(TransactionTestCase):
             "La garantía es de 6 meses.", "cual es la garantia?", "ventas",
             conv=self.conv)
 
-    def test_el_modelo_imagen_del_extractor_se_usa_si_el_grafo_no_trajo_uno(self):
-        # modelo_imagen sale del extractor, y la foto se manda en esta misma
-        # cola: por eso la extraccion va ANTES del envio de la imagen.
-        # El intent va en el dict porque la foto pasa por la compuerta
-        # INTENTS_CON_IMAGEN (ver CompuertaDeImagenEnLaColaTest): sin un intent
-        # que la justifique, el extractor puede proponer el modelo pero la foto
-        # no sale.
-        with patch("bot.scraping.imagenes.resolver_imagen_modelo",
-                   return_value="https://x/kwid.jpg"):
-            self._correr({"modelo_imagen": "kwid", "intent": "explorar"})
-        self.wa.send_image.assert_called_once_with(self.conv.wa_id, "https://x/kwid.jpg")
-
-    def test_el_modelo_imagen_del_grafo_gana_sobre_el_del_extractor(self):
+    def test_el_modelo_imagen_del_grafo_se_manda_directo(self):
+        # InTouch es B2B y su extractor ya no propone `modelo_imagen` (contrato
+        # sin fotos de vehiculo, commit e185fac). El unico origen que queda es
+        # el parametro que llega del camino JSON viejo (bot/flow/graph.py), y
+        # se manda tal cual, sin pasar por la extraccion.
         with patch("bot.scraping.imagenes.resolver_imagen_modelo",
                    return_value="https://x/koleos.jpg") as mock_resolver:
-            self._correr({"modelo_imagen": "kwid"}, modelo_imagen="koleos")
+            self._correr({"intent": "explorar"}, modelo_imagen="koleos")
         mock_resolver.assert_called_once_with("koleos")
 
     def test_sin_metadatos_no_llama_al_extractor(self):
@@ -114,61 +106,6 @@ class ExtractorEnLaColaTest(TransactionTestCase):
             _enviar(self.conv.pk, self.conv.wa_id, ["parte 2"], None, [], wa,
                     metadatos={"prosa": "x", "mensaje_cliente": "y", "nombre_agente": "ventas"})
         self.assertEqual(orden, ["envio", "extraccion"])
-
-
-class CompuertaDeImagenEnLaColaTest(TransactionTestCase):
-    """La foto solo sale si el intent del turno la justifica.
-
-    REGRESION real del refactor de prosa (2026-09-03): la compuerta
-    INTENTS_CON_IMAGEN se aplicaba SOLO en el camino JSON viejo
-    (bot/flow/graph.py), y desde el refactor el camino normal es este, donde
-    `modelo_imagen` sale del extractor. Nadie leia el `intent` aca -- un
-    `grep intent bot/whatsapp/cola_envio.py` no devolvia una sola linea -- asi
-    que volvio el bug que la compuerta habia tapado: una mencion de pasada del
-    modelo (negociando parte de pago o financiamiento) mandaba una foto que no
-    venia al caso. El otro guardrail que existe
-    (`_imagen_enviada_recientemente`) es anti-duplicado, no anti-irrelevancia.
-    """
-
-    def setUp(self):
-        self.conv = Conversation.objects.create(wa_id="56911110002", name="Tomas")
-        self.wa = MagicMock()
-
-    def _correr(self, meta, modelo_imagen=None):
-        from bot.whatsapp.cola_envio import _enviar
-        with patch("bot.whatsapp.cola_envio._extraer_sync", return_value=meta):
-            _enviar(self.conv.pk, self.conv.wa_id, [], modelo_imagen, [], self.wa,
-                    metadatos={"prosa": "p", "mensaje_cliente": "m", "nombre_agente": "ventas"})
-
-    def test_la_foto_sale_con_un_intent_de_la_compuerta(self):
-        with patch("bot.scraping.imagenes.resolver_imagen_modelo",
-                   return_value="https://x/kwid.jpg"):
-            self._correr({"modelo_imagen": "kwid", "intent": "explorar"})
-        self.wa.send_image.assert_called_once_with(self.conv.wa_id, "https://x/kwid.jpg")
-
-    def test_la_foto_no_sale_con_un_intent_fuera_de_la_compuerta(self):
-        with patch("bot.scraping.imagenes.resolver_imagen_modelo") as mock_resolver:
-            self._correr({"modelo_imagen": "kwid", "intent": "financiar"})
-        mock_resolver.assert_not_called()
-        self.wa.send_image.assert_not_called()
-
-    def test_sin_intent_no_sale_la_foto(self):
-        # intent None es lo que devuelve el extractor cuando no tiene evidencia,
-        # y lo unico que puede devolver un especialista que no declara el campo
-        # (bot/flow/respuesta.py::campos_de). Sin evidencia no se manda nada.
-        with patch("bot.scraping.imagenes.resolver_imagen_modelo") as mock_resolver:
-            self._correr({"modelo_imagen": "kwid"})
-        mock_resolver.assert_not_called()
-
-    def test_el_modelo_imagen_del_grafo_no_se_vuelve_a_gatear(self):
-        # El camino viejo YA gatea contra INTENTS_CON_IMAGEN en graph.py:779.
-        # Si la cola lo gateara de nuevo contra el intent del extractor, un
-        # especialista custom que responde en JSON perderia su foto por un
-        # intent que ni siquiera es el suyo.
-        with patch("bot.scraping.imagenes.resolver_imagen_modelo",
-                   return_value="https://x/koleos.jpg") as mock_resolver:
-            self._correr({"intent": "financiar"}, modelo_imagen="koleos")
-        mock_resolver.assert_called_once_with("koleos")
 
 
 class RachaDeFallosDelExtractorTest(TransactionTestCase):
@@ -236,10 +173,10 @@ class RachaDeFallosDelExtractorTest(TransactionTestCase):
 class UltimaExtraccionTest(TransactionTestCase):
     """Lo que el extractor decidio queda legible despues del turno.
 
-    Desde el refactor de prosa el resultado del grafo ya NO trae `intent` ni
-    `modelo_imagen`: nacen en la cola, despues de que el grafo termino. El
-    simulador (bot/simulator/app_wrapper.py) los leia del resultado del grafo y
-    por eso veia `intent=None` en todos los turnos.
+    Desde el refactor de prosa el resultado del grafo ya NO trae `intent`:
+    nace en la cola, despues de que el grafo termino. El simulador
+    (bot/simulator/app_wrapper.py) lo leia del resultado del grafo y por eso
+    veia `intent=None` en todos los turnos.
     """
 
     def setUp(self):
@@ -248,7 +185,7 @@ class UltimaExtraccionTest(TransactionTestCase):
     def test_queda_registrado_lo_que_saco_el_extractor(self):
         from bot.whatsapp.cola_envio import _enviar, ultima_extraccion
         with patch("bot.whatsapp.cola_envio._extraer_sync",
-                   return_value={"intent": "cotizar", "modelo_imagen": ""}):
+                   return_value={"intent": "cotizar"}):
             _enviar(self.conv.pk, self.conv.wa_id, [], None, [], MagicMock(),
                     metadatos={"prosa": "p", "mensaje_cliente": "m", "nombre_agente": "ventas"})
         self.assertEqual(ultima_extraccion(self.conv.wa_id)["intent"], "cotizar")

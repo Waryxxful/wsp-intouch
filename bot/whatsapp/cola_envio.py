@@ -223,40 +223,12 @@ def _enviar(conv_pk: int, wa_id: str, partes: list[str], modelo_imagen: str | No
             _guardar(conv, parte)
         if metadatos:
             # El orden importa y esta testeado: primero salen las partes (el
-            # cliente lee), recien despues se extrae. Y va ANTES de la imagen
-            # porque `modelo_imagen` puede salir de aca.
+            # cliente lee), recien despues se extrae.
             meta = _extraer_sync(metadatos["prosa"], metadatos["mensaje_cliente"],
                                  metadatos["nombre_agente"], conv=conv)
             _recordar_extraccion(wa_id, meta)
             _vigilar_racha_del_extractor(conv, meta)
             _persistir_metadatos(conv, meta)
-            if meta.get("modelo_imagen") and not modelo_imagen:
-                # La compuerta INTENTS_CON_IMAGEN se aplicaba SOLO en el camino
-                # JSON viejo (bot/flow/graph.py:779) y desde el refactor de
-                # prosa el camino normal es este, donde `modelo_imagen` sale del
-                # extractor: la foto se mandaba sin mirar el intent. Con eso
-                # volvio el bug que la compuerta habia tapado -- el LLM ponia
-                # `modelo_imagen` con una mencion de pasada del modelo
-                # (negociando parte de pago o financiamiento) y salia una foto
-                # que no venia al caso. `_imagen_enviada_recientemente` no cubre
-                # esto: es anti-duplicado, no anti-irrelevancia.
-                #
-                # Se IMPORTA la constante, no se copia: dos definiciones del
-                # mismo set derivan en silencio en cuanto alguien toque una.
-                # Import local por lo mismo que el resto de este modulo:
-                # handlers lo importa a nivel de modulo y bot.flow arrastra
-                # media medio repo.
-                from bot.flow.graph import INTENTS_CON_IMAGEN
-                if meta.get("intent") in INTENTS_CON_IMAGEN:
-                    modelo_imagen = meta["modelo_imagen"]
-                else:
-                    logger.info(
-                        "[cola] no se manda la foto de %s: intent=%r fuera de %s",
-                        meta["modelo_imagen"], meta.get("intent"), sorted(INTENTS_CON_IMAGEN),
-                    )
-            # Ojo: el `modelo_imagen` que llega por parametro viene del camino
-            # viejo y YA esta gateado en graph.py:779. No se lo vuelve a gatear
-            # contra el intent del extractor, que no es el suyo.
         if modelo_imagen:
             _enviar_imagen(conv, wa, modelo_imagen)
         for sucursal_id in sucursal_ids:
@@ -461,11 +433,11 @@ def _persistir_metadatos(conv, meta: dict) -> None:
     if cambio:
         conv.save()
     # El lead comercial va DESPUES del save de la conversacion y en su propio
-    # try: escribe otra tabla (LeadComercial) y su fallo no puede costar los
-    # metadatos de arriba, que ya estan guardados. Antes esto era una tool que
-    # el especialista pedia en una segunda ronda, dentro de la latencia que el
-    # cliente siente -- ver docs/PENDIENTES.md 32.a.
-    from bot.business.prospeccion import registrar_lead_del_turno
+    # try: escribe otra tabla (LeadInTouch) y su fallo no puede costar los
+    # metadatos de arriba, que ya estan guardados. Antes de este stack esto era
+    # una tool que el especialista pedia en una segunda ronda, dentro de la
+    # latencia que el contacto siente -- ver el spec §7.1.
+    from bot.business.lead_intouch import registrar_lead_del_turno
 
     registrar_lead_del_turno(conv.wa_id, meta.get("lead"))
     # Los incidentes van DESPUES del save: si el save falla, no queremos haber

@@ -72,42 +72,63 @@ _PRESUPUESTO_TOTAL_SEGUNDOS = 35
 # rápidos, que es cuando sirven.
 _MAX_REINTENTOS = 2
 
-# Los antecedentes comerciales del cliente (docx S8), con los MISMOS nombres de
-# parametro que exponia la tool `registrar_datos_lead`: los escribe la misma
-# funcion (bot/business/prospeccion.py::registrar_lead_de_metadatos), asi que un
-# nombre distinto aca se perderia en silencio.
+# Los antecedentes del contrato del prompt §8, con los MISMOS nombres de campo
+# que escribe bot/business/lead_intouch.py::CAMPOS_ESCRIBIBLES: un nombre
+# distinto acá no da error, el campo simplemente no se escribe y el dato se
+# pierde en silencio. Hay un test que ancla la correspondencia.
 #
-# POR QUE VIVEN ACA Y NO EN UNA TOOL DEL ESPECIALISTA (docs/PENDIENTES.md 32.a,
-# medido el 2026-09-07 sobre 324 turnos de cavem en Langfuse): pedirlos por tool
-# le costaba al cliente una LLAMADA ENTERA al LLM en el 17,3% de los turnos
-# -- 4,53s de mediana -- porque el modelo buscaba primero y registraba despues,
-# en una segunda ronda. Aca el dato sale de la misma llamada que ya se hacia
-# igual, fuera de la latencia percibida.
+# `lead_score` NO se le pide al modelo (spec §7.3): lo calcula
+# `calcular_lead_score` desde las señales de abajo. Pedírselo además sería
+# tener dos escritores del mismo dato, y el del modelo no es reproducible.
 #
-# Los montos se piden como STRING y no como entero a proposito: el modelo copia
-# al cliente ("15 millones", "20 palos") y no convierte. Con entero se perdian
-# 3 de 21 presupuestos evidenciados; con string y la conversion en codigo
-# (bot/flow/flow_data.py::_a_numero), 21 de 21.
+# El teléfono tampoco: llega de los metadatos de WhatsApp y el prompt prohíbe
+# pedírselo al contacto.
 #
-# `intencion` es un enum y no texto libre por la misma clase de razon: en texto
-# libre el modelo chico escribia su propio vocabulario ("comprar", "buscar",
-# "ver el vehiculo") donde la tool escribia "compra vehiculo", y esa columna la
-# muestra el panel (admin_panel/views.py). Con enum cae exacto en 51 de 58.
+# Los enums existen por la misma razón que en el bot anterior: en texto libre
+# el modelo chico escribe su propio vocabulario, y esas columnas las muestra el
+# panel. `volumen_interacciones` sí es texto libre a propósito -- el prompt §8
+# pide conservar período y unidad tal como los dijo el contacto.
+_SENALES_PROPIEDADES = {
+    "encaje_con_oferta": {"type": "boolean"},
+    "necesidad_concreta": {"type": "boolean"},
+    "interes_evaluar": {"type": "boolean"},
+    "solicita_siguiente_paso": {"type": "boolean"},
+    "intencion_avanzar_declarada": {"type": "boolean"},
+    "plazo_cercano_declarado": {"type": "boolean"},
+    "interes_exploratorio": {"type": "boolean"},
+}
+
 LEAD_PROPIEDADES = {
-    "nombre": {"type": "string"},
-    "email": {"type": "string"},
-    "comuna": {"type": "string"},
-    "vehiculo_interes": {"type": "string"},
-    "presupuesto": {"type": "string"},
-    "pie_disponible": {"type": "string"},
-    "cuota_objetivo": {"type": "string"},
-    "cuando_compra": {"type": "string"},
-    "intencion": {"type": "string", "enum": [
-        "compra vehículo", "servicio técnico", "parte de pago", ""]},
-    "sentimiento": {"type": "string", "enum": ["positivo", "neutro", "negativo", ""]},
-    "urgencia": {"type": "string", "enum": ["alta", "media", "baja", ""]},
-    "proxima_accion": {"type": "string"},
-    "resumen": {"type": "string"},
+    "nombre_completo": {"type": "string"},
+    "correo": {"type": "string"},
+    "empresa": {"type": "string"},
+    "industria": {"type": "string"},
+    "subtipo_automotriz": {"type": "string", "enum": [
+        "importador", "concesionario", "automotora", "servicio_tecnico",
+        "rent_a_car", "financiera", "otro", ""]},
+    "cargo": {"type": "string"},
+    "pais_ciudad": {"type": "string"},
+    "situacion_contact_center": {"type": "string", "enum": ["tiene", "no_tiene", ""]},
+    "tipo_contact_center": {"type": "string", "enum": [
+        "propio", "externalizado", "mixto", "no_tiene", ""]},
+    "usa_ia_actualmente": {"type": "boolean"},
+    "canales_actuales": {"type": "array", "items": {"type": "string"}},
+    "volumen_interacciones": {"type": "string"},
+    "necesidad_principal": {"type": "string"},
+    "soluciones_interes": {"type": "array", "items": {"type": "string"}},
+    "intencion": {"type": "string"},
+    "plazo_proyecto": {"type": "string"},
+    "solicita_consultoria": {"type": "boolean"},
+    "solicita_contacto_humano": {"type": "boolean"},
+    "resumen_conversacion": {"type": "string"},
+    "siguiente_accion_recomendada": {"type": "string"},
+    # Las señales que alimentan el score. Son observaciones, no un veredicto.
+    "senales": {
+        "type": "object",
+        "additionalProperties": False,
+        "properties": _SENALES_PROPIEDADES,
+        "required": list(_SENALES_PROPIEDADES),
+    },
 }
 LEAD_PROPIEDADES_WRAPPER = {
     "type": "object",
@@ -126,19 +147,17 @@ SCHEMA_METADATOS = {
         "additionalProperties": False,
         "properties": {
             "intent": {"type": "string", "enum": [
-                "explorar", "cotizar", "financiar", "test_drive", "reservar",
-                "objecion", "winback", "handoff", "cortesia", ""]},
+                "informarse", "diagnosticar", "cotizar", "agendar_reunion",
+                "soporte", "otro_asunto", "cortesia", "handoff", ""]},
             "lead_class": {"type": "string", "enum": ["HOT", "WARM", "COLD", ""]},
             "stage": {"type": "string", "enum": [
-                "nuevo", "descubrimiento", "calificacion", "cotizacion",
-                "simulacion", "agenda", "handoff", "seguimiento", "reclamo",
-                "cerrado", ""]},
+                "nuevo", "descubrimiento", "diagnostico", "recomendacion",
+                "calificacion", "siguiente_paso", "handoff", "cerrado", ""]},
             "handoff": {"type": "boolean"},
             "handoff_reason": {"type": "string"},
             "requiere_revision": {"type": "boolean"},
             "motivo_revision": {"type": "string"},
             "next_state": {"type": "string"},
-            "modelo_imagen": {"type": "string"},
             "extracted_data": {"type": "object", "additionalProperties": True},
             "lead": LEAD_PROPIEDADES_WRAPPER,
         },
@@ -146,7 +165,7 @@ SCHEMA_METADATOS = {
         # forma de decir "no tengo evidencia de esto".
         "required": ["intent", "lead_class", "stage", "handoff", "handoff_reason",
                      "requiere_revision", "motivo_revision", "next_state",
-                     "modelo_imagen", "extracted_data", "lead"],
+                     "extracted_data", "lead"],
     },
 }
 
@@ -172,57 +191,82 @@ SCHEMA_METADATOS = {
 # el historial delante, un modelo chico puede marcar `handoff` por un pedido de
 # hace cinco turnos que ya se resolvió. Los campos POR TURNO se acotan al turno
 # palabra por palabra; el historial es contexto solo para el resumen.
-PROMPT_EXTRACTOR = """Eres un clasificador. Recibes una conversación entre un cliente de una
-concesionaria y un asesor, y el último turno de esa conversación. Tu única
-tarea es rellenar los metadatos en el JSON pedido.
+PROMPT_EXTRACTOR = """Eres un clasificador. Recibes una conversación entre una empresa interesada
+y un asesor comercial, y el último turno de esa conversación. Tu única tarea es
+rellenar los metadatos en el JSON pedido.
 
 NO reescribas la respuesta. NO agregues texto. Solo clasificas lo que ya pasó.
 
 Reglas que no se negocian:
-- "handoff", "requiere_revision", "intent" y "modelo_imagen" hablan
-  SOLO de este turno: el que aparece abajo bajo "EL TURNO A CLASIFICAR". La conversación
-  previa es contexto para el resumen, NO para estos campos: un pedido de hablar
-  con un humano que ya se resolvió hace cinco turnos no es un handoff de ahora.
-- "handoff" es true SOLO si la respuesta del asesor dice explícitamente que un
-  humano va a tomar el caso, o si el cliente pidió hablar con una persona. Si
+- "handoff", "requiere_revision" e "intent" hablan SOLO de este turno: el que
+  aparece abajo bajo "EL TURNO A CLASIFICAR". La conversación previa es
+  contexto para el resumen, NO para estos campos: un pedido de hablar con una
+  persona que ya se resolvió hace cinco turnos no es un handoff de ahora.
+- "handoff" es true SOLO si la respuesta del asesor dice explícitamente que una
+  persona va a tomar el caso, o si el contacto pidió hablar con alguien. Si
   tienes dudas, es false. Nunca lo inventes.
-- "requiere_revision" es true si hay un riesgo real de seguridad, un reclamo
-  grave, una amenaza de acción legal, o CUALQUIER pedido del cliente sobre sus
-  datos personales (que los borren, que no lo contacten más, que le digan qué
-  información tienen de él). Ante la duda en estos casos, marcalo en true: que
-  un humano revise de más no cuesta nada, que no revise un caso legal sí.
-- "extracted_data" son datos concretos del cliente que convenga recordar
-  (presupuesto, modelo de interés, comuna, plazo de compra). Si no hay ninguno,
-  un objeto vacío.
-- "lead" son los antecedentes comerciales del cliente, para que el vendedor
-  retome el caso. Llena solo los campos que el cliente HAYA DICHO en este
-  turno, o que la respuesta del asesor confirme; el resto va en cadena vacía.
-  No deduzcas ni estimes: un campo vacío se puede preguntar después, uno
-  inventado se le entrega al vendedor como si fuera cierto.
-  - "presupuesto", "pie_disponible" y "cuota_objetivo" son montos en pesos.
-    Cópialos TAL COMO los dijo el cliente, sin convertir nada ("15 millones",
-    "20 palos", "$8.000.000", "500 mil"): el sistema los pasa a número.
-  - "cuando_compra" es la FECHA en que el cliente dijo que quiere comprar, con
-    sus palabras (ej. "este viernes", "este mes"). NO es el plazo del crédito:
-    una simulación "a 24 cuotas" no dice nada de cuándo compra. Si no lo dijo,
-    déjalo vacío.
-  - "resumen" y "proxima_accion" son los ÚNICOS campos que describen el CASO
-    COMPLETO y no este turno: úsalos con toda la conversación previa a la
-    vista. "resumen" es una línea para que un ejecutivo entienda el caso sin
-    releer el chat (qué busca, con qué presupuesto, en qué quedó) y
-    "proxima_accion" es qué corresponde hacer después. No afirmes que falta un
-    dato sin revisar la conversación completa: si el cliente lo dijo antes, ahí
-    está.
-- "modelo_imagen" solo si la respuesta ofrece un modelo puntual cuya foto
-  tendría sentido mandar; si no, cadena vacía.
-- Cualquier campo del que no tengas evidencia va en cadena vacía (o false).
+- "requiere_revision" es true si hay un reclamo grave, una amenaza de acción
+  legal, o CUALQUIER pedido del contacto sobre sus datos personales (que los
+  borren, que no lo contacten más, que le digan qué información tienen de él).
+  Ante la duda en estos casos, márcalo en true: que una persona revise de más
+  no cuesta nada, que no revise un caso legal sí.
+- "extracted_data" son datos concretos del contacto que convenga recordar. Si
+  no hay ninguno, un objeto vacío.
+- "lead" son los antecedentes comerciales, para que un ejecutivo retome el
+  caso. Llena solo los campos que el contacto HAYA DICHO en este turno, o que
+  la respuesta del asesor confirme; el resto va en cadena vacía, lista vacía o
+  false. No deduzcas ni estimes: un campo vacío se puede preguntar después, uno
+  inventado se le entrega al ejecutivo como si fuera cierto.
+  - No deduzcas la empresa, la industria, el cargo ni la ubicación a partir del
+    correo, del número de teléfono o del nombre.
+  - "correo": cópialo tal como lo escribió el contacto. No lo corrijas.
+  - "volumen_interacciones": cópialo con sus palabras, conservando el período y
+    la unidad que dijo ("unas 3.000 al mes", "200 llamadas diarias"). Si no dio
+    período, no lo inventes.
+  - "situacion_contact_center" y "tipo_contact_center": si dijo que no tiene
+    Contact Center, ambos van en "no_tiene". Si tiene pero no dijo la
+    modalidad, "tiene" y el tipo vacío. Si combina operación propia con una
+    externalizada, el tipo es "mixto".
+  - "soluciones_interes" son las soluciones que le interesan al CONTACTO. No
+    confundas con las que el asesor le ofreció.
+  - "solicita_consultoria" y "solicita_contacto_humano" van en true SOLO si el
+    contacto lo pidió o lo aceptó explícitamente. Que haya entregado sus datos
+    no significa que pidió una reunión.
+  - "subtipo_automotriz": solo si la industria es automotriz y el contacto
+    confirmó cuál. "otro" significa que dijo una categoría distinta de las
+    seis; si no lo dijo, va vacío.
+  - "resumen_conversacion" y "siguiente_accion_recomendada" son los ÚNICOS
+    campos que describen el CASO COMPLETO y no este turno: úsalos con toda la
+    conversación previa a la vista. El resumen es un párrafo breve para que un
+    ejecutivo entienda el caso sin releer el chat: qué necesita, en qué
+    contexto, qué evidencia hay de su interés, qué datos faltan y en qué
+    quedaron. Distingue los hechos de las recomendaciones. No afirmes que falta
+    un dato sin revisar la conversación completa: si el contacto lo dijo antes,
+    ahí está.
+  - "senales" son observaciones sobre el caso completo, para calificar la
+    oportunidad. Cada una es true solo con evidencia en la conversación:
+    - "encaje_con_oferta": lo que necesita se parece a lo que hace InTouch
+      (contactabilidad, experiencia de cliente, Contact Center, automatización,
+      agentes conversacionales, analítica).
+    - "necesidad_concreta": describió una necesidad concreta, no solo curiosidad.
+    - "interes_evaluar": quiere evaluar una solución.
+    - "solicita_siguiente_paso": pidió o aceptó una reunión, una demo, una
+      consultoría o que lo contacte una persona.
+    - "intencion_avanzar_declarada": dijo que quiere avanzar.
+    - "plazo_cercano_declarado": dio un plazo cercano explícito.
+    - "interes_exploratorio": hay interés comercial pero sin necesidad concreta
+      ni intención de avanzar ahora.
+    No estimes presupuesto, autoridad de compra ni urgencia que no haya dicho.
+- Cualquier campo del que no tengas evidencia va en cadena vacía, lista vacía o
+  false.
 
-Conversación previa (contexto para "resumen" y "proxima_accion"):
+Conversación previa (contexto para "resumen_conversacion",
+"siguiente_accion_recomendada" y "senales"):
 {historial}
 
 === EL TURNO A CLASIFICAR ===
 
-Mensaje del cliente:
+Mensaje del contacto:
 {mensaje_cliente}
 
 Respuesta que el asesor ya le mandó:
@@ -423,7 +467,7 @@ async def extraer_metadatos(prosa: str, mensaje_cliente: str, nombre_agente: str
 
     salida = {}
     for campo in ("intent", "lead_class", "stage", "next_state",
-                  "modelo_imagen", "handoff_reason", "motivo_revision"):
+                  "handoff_reason", "motivo_revision"):
         if campo in permitidos:
             salida[campo] = _limpio(datos.get(campo))
     for campo in ("handoff", "requiere_revision"):

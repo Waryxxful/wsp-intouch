@@ -27,7 +27,7 @@ class SchemaTest(SimpleTestCase):
         props = SCHEMA_METADATOS["schema"]["properties"]
         for campo in ("intent", "lead_class", "stage", "handoff", "handoff_reason",
                       "requiere_revision", "motivo_revision", "extracted_data",
-                      "next_state", "modelo_imagen"):
+                      "next_state"):
             self.assertIn(campo, props)
 
     def test_el_schema_no_pide_el_mensaje(self):
@@ -54,8 +54,10 @@ class ExtraerMetadatosTest(SimpleTestCase):
         self.assertEqual(m["lead_class"], "WARM")
 
     def test_descarta_los_campos_que_el_especialista_no_declara(self):
-        m = self._extraer('{"modelo_imagen": "kwid", "lead_class": "HOT"}', nombre_agente="faq")
-        self.assertNotIn("modelo_imagen", m)
+        # "faq" no declara "intent" (bot/flow/respuesta.py::CAMPOS_EXTRA_POR_AGENTE):
+        # solo "comercial" lo hace.
+        m = self._extraer('{"intent": "cotizar", "lead_class": "HOT"}', nombre_agente="faq")
+        self.assertNotIn("intent", m)
 
     def test_json_invalido_devuelve_vacio_y_no_revienta(self):
         self.assertEqual(self._extraer("no soy json"), {})

@@ -61,20 +61,20 @@ CAMPOS_BASE = frozenset({
     "handoff", "handoff_reason", "requiere_revision", "motivo_revision",
 })
 
-# Extras por slug de especialista. Espeja exactamente lo que cada
-# build_system_prompt ofrecia en su bloque "## RESPUESTA" antes de este cambio,
-# para no alterar comportamiento junto con la latencia:
-#   - ventas (bot/flow/agents/custom.py): intent, modelo_imagen, lead_class, stage
-#   - faq (bot/flow/agents/faq.py): sucursal_direccion_ids
-# "ventas" NO declara sucursal_direccion_ids a proposito: nunca lo tuvo en su
-# contrato, y sus ids de sucursal se resuelven por el fallback deterministico
-# `_extraer_sucursal_ids_de_tools` (graph.py), que sigue corriendo igual.
+# Extras por slug de especialista. Un campo que llega desde un especialista que
+# no lo declara se descarta en silencio.
+#
+# `comercial` es el único especialista de este bot (spec §2.2). Declara `lead`
+# porque es quien califica oportunidades, y `lead` entra por los dos caminos de
+# salida: lo llena el especialista si responde por `responder`, y el extractor
+# si responde en prosa (que es el camino normal desde el refactor de prosa).
+#
+# Las entradas de `ventas` y `faq` se conservan para los especialistas
+# heredados desregistrados: sus tests siguen corriendo y este módulo genera a
+# la vez el bloque de prompt y el filtro de campos, así que borrarlas
+# rompería la suite sin ganar nada.
 CAMPOS_EXTRA_POR_AGENTE = {
-    # `lead` son los antecedentes comerciales del docx S8. Va en "ventas" y no
-    # en CAMPOS_BASE porque es el unico especialista que califica leads, y
-    # entra por los DOS caminos de salida: lo llena el especialista cuando
-    # responde por `responder`, y el extractor cuando responde en prosa. Ver
-    # docs/PENDIENTES.md 32.a.
+    "comercial": frozenset({"intent", "stage", "lead"}),
     "ventas": frozenset({"intent", "modelo_imagen", "lead_class", "stage", "lead"}),
     "faq": frozenset({"sucursal_direccion_ids"}),
 }

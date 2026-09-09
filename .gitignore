@@ -1,0 +1,5 @@
+dios.json
+.env.docker
+*.sqlite3
+__pycache__/
+*.pyc

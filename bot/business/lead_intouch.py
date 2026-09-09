@@ -167,6 +167,8 @@ def _registrar_lead_impl(wa_id: str, datos: dict, senales=None) -> dict:
             logger.warning("[lead] no pude notificar el lead HOT de %s", wa_id,
                            exc_info=True)
 
+    _despachar_si_corresponde(wa_id)
+
     resultado = {
         "ok": True,
         "lead_score": lead.lead_score,
@@ -209,15 +211,100 @@ def registrar_lead_del_turno(wa_id: str, lead) -> None:
                 LeadInTouch.objects.filter(conversation__wa_id=wa_id).exists()):
             return
         _registrar_lead_impl(wa_id, datos, senales=lead.get("senales"))
-        _despachar_si_corresponde(wa_id)
     except Exception:
         logger.error("[lead] no pude registrar el lead de %s", wa_id, exc_info=True)
 
 
-def _despachar_si_corresponde(wa_id: str) -> None:
-    """Notifica el lead HOT y lo manda al destino externo, si hay uno.
+def clave_idempotencia(lead) -> str:
+    """Clave estable por conversación, para que el receptor pueda deduplicar.
 
-    Se implementa en las Tasks 16 y 17. Acá queda el punto de llamada para que
-    `registrar_lead_del_turno` no tenga que cambiar después.
+    Es el punto 5 de la sección "Ajustes necesarios" del prompt de origen: la
+    instrucción al modelo no alcanza frente a reentregas de WhatsApp ni a
+    fallos de red. La clave es estable porque hay UN lead por conversación
+    (OneToOne), así que dos despachos del mismo lead llevan la misma clave y el
+    receptor sabe que son el mismo hecho.
+
+    Va hasheada: viaja a otro sistema y no tiene por qué llevar el teléfono en
+    claro cuando un hash cumple la misma función.
     """
-    return
+    import hashlib
+
+    crudo = f"wsp_intouch:{lead.conversation.wa_id}"
+    return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:32]
+
+
+# Los campos del contrato que viajan al destino externo. Explícito y no
+# `__dict__`: así un campo interno nuevo (un flag de proceso, una marca de
+# tiempo) no se filtra al payload sin que nadie lo decida.
+_CAMPOS_DEL_PAYLOAD = (
+    "nombre_completo", "correo", "empresa", "industria", "subtipo_automotriz",
+    "cargo", "pais_ciudad", "situacion_contact_center", "tipo_contact_center",
+    "usa_ia_actualmente", "canales_actuales", "volumen_interacciones",
+    "necesidad_principal", "soluciones_interes", "intencion", "plazo_proyecto",
+    "lead_score", "solicita_consultoria", "solicita_contacto_humano",
+    "resumen_conversacion", "siguiente_accion_recomendada",
+)
+
+
+def payload_del_lead(lead) -> dict:
+    """El lead como lo espera el endpoint del spec B."""
+    payload = {campo: getattr(lead, campo) for campo in _CAMPOS_DEL_PAYLOAD}
+    # El teléfono lo agrega la PLATAFORMA desde los metadatos de WhatsApp, no
+    # el modelo: el prompt le prohíbe pedirlo, pero el equipo comercial
+    # necesita a quién llamar.
+    payload["telefono"] = lead.conversation.wa_id
+    payload["origen"] = "wsp_intouch"
+    payload["clave_idempotencia"] = clave_idempotencia(lead)
+    return payload
+
+
+def _enviar_al_sink(payload: dict) -> bool:
+    """POST al endpoint configurado. True si el receptor lo aceptó.
+
+    stdlib `urllib` y no `requests`, que no está en requirements -- mismo
+    criterio que bot/notify.py y utils/dios_registration.py.
+    """
+    import json
+    import urllib.request
+
+    destino = getattr(settings, "LEAD_SINK_URL", "")
+    if not destino:
+        logger.warning("[lead] LEAD_SINK=http pero LEAD_SINK_URL está vacío")
+        return False
+    req = urllib.request.Request(
+        destino, data=json.dumps(payload).encode("utf-8"),
+        headers={"Content-Type": "application/json"}, method="POST")
+    with urllib.request.urlopen(req, timeout=10) as resp:
+        # Se verifica el CÓDIGO, no que el POST se haya completado. Un
+        # despachador que devuelve éxito para un HTTP de error convierte un
+        # fallo en "no había datos" -- la falla de §IV.1 que este stack ya pagó.
+        return 200 <= resp.status < 300
+
+
+def _despachar_si_corresponde(wa_id: str) -> None:
+    """Manda el lead al destino externo, si hay uno configurado y falta.
+
+    Un fallo NO sella `despachado_en`: un lead sin despachar tiene que quedar
+    visible y reintentable. Y nunca propaga: la fuente de verdad ya está
+    escrita, y el despacho es un espejo.
+    """
+    sink = getattr(settings, "LEAD_SINK", "none")
+    if sink == "none":
+        return
+    if sink not in SINKS_VALIDOS:
+        logger.warning(
+            "[lead] LEAD_SINK=%r no es un destino conocido (%s): el lead no se despacha",
+            sink, ", ".join(sorted(SINKS_VALIDOS)))
+        return
+    lead = LeadInTouch.objects.filter(
+        conversation__wa_id=wa_id, despachado_en__isnull=True).first()
+    if lead is None:
+        return
+    try:
+        if _enviar_al_sink(payload_del_lead(lead)):
+            lead.despachado_en = timezone.now()
+            lead.save(update_fields=["despachado_en"])
+        else:
+            logger.warning("[lead] el destino externo rechazó el lead de %s", wa_id)
+    except Exception:
+        logger.warning("[lead] no pude despachar el lead de %s", wa_id, exc_info=True)

@@ -1,6 +1,6 @@
 """Cobertura del comando que mete los documentos de conocimiento al pipeline.
 
-Existe porque el hueco que este comando cierra era invisible: los 5 .md de
+Existe porque el hueco que este comando cierra era invisible: los .md de
 `bot/fixtures/rag/` estaban escritos, `reindexar_conocimiento_rag` corria sin
 error, y el RAG quedaba vacio igual -- ese comando indexa ScrapedPage, y nada
 creaba las ScrapedPage de esos archivos (hallazgo 2026-09-02, docs/PENDIENTES.md).
@@ -13,7 +13,7 @@ from django.core.management import call_command
 from django.core.management.base import CommandError
 from django.test import TestCase
 
-from bot.management.commands.cargar_conocimiento_rag import URL_FUENTE
+from bot.management.commands.cargar_conocimiento_rag import DIRECTORIO_DEFAULT, URL_FUENTE
 from bot.models import ScrapedPage, ScrapeRun, ScrapingSource
 
 
@@ -100,8 +100,21 @@ class CargarConocimientoRagTest(TestCase):
         # Guard contra el caso que motivo el comando: que los .md existan pero
         # no lleguen nunca al pipeline. Si alguien renombra el directorio o
         # borra las bases, esto se cae.
+        #
+        # Cuenta contra los archivos .md reales del directorio, no un numero
+        # fijo: un numero fijo se vuelve a romper la proxima vez que alguien
+        # agregue o saque un documento (paso exactamente por eso de 5 a 7
+        # documentos en 2026-09-09). Y exige ademas que el resultado sea mayor
+        # que cero -- sin ese segundo assert, el test pasaria igual con el
+        # directorio vacio, que es precisamente el modo de falla mas caro de
+        # esta parte: el RAG queda sin nada y el bot arranca perfecto
+        # contestando cualquier cosa (hallazgo 2026-09-02).
+        esperadas = len(list(DIRECTORIO_DEFAULT.glob("*.md")))
+        self.assertGreater(esperadas, 0, f"no hay documentos .md en {DIRECTORIO_DEFAULT}")
+
         call_command("cargar_conocimiento_rag", cliente=settings.CLIENTE_ACTIVO)
 
         paginas = ScrapedPage.objects.filter(run__source__cliente=settings.CLIENTE_ACTIVO)
-        self.assertEqual(paginas.count(), 5)
+        self.assertGreater(paginas.count(), 0)
+        self.assertEqual(paginas.count(), esperadas)
         self.assertTrue(all(p.es_documento and p.texto.strip() for p in paginas))

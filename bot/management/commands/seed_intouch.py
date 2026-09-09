@@ -58,7 +58,7 @@ SOLUCIONES = [
         "categoria": "agentes_ia",
         "descripcion": "Agentes que conversan con los clientes en WhatsApp, voz, chat y "
                        "correo electrónico, para procesos estructurados y atención de alto volumen.",
-        "canales": ["whatsapp", "voz", "chat", "email"],
+        "canales": ["whatsapp", "voz", "chat", "correo"],
         "modelos_operacion": ["automatizado", "hibrido"],
         "ejemplos_uso": "Atención de consultas frecuentes y toma de datos en WhatsApp, "
                         "con derivación a un agente humano cuando el caso lo requiere.",
@@ -70,7 +70,7 @@ SOLUCIONES = [
         "categoria": "operacion",
         "descripcion": "Operación de Contact Center con agentes especializados, "
                        "supervisión y control de calidad.",
-        "canales": ["voz", "whatsapp", "chat", "email"],
+        "canales": ["voz", "whatsapp", "chat", "correo"],
         "modelos_operacion": ["humano", "hibrido"],
         "ejemplos_uso": "Una empresa que necesita externalizar total o parcialmente "
                         "su atención, o complementar la operación que ya tiene.",
@@ -94,7 +94,7 @@ SOLUCIONES = [
         "categoria": "analitica",
         "descripcion": "Análisis de las conversaciones de la operación y control de "
                        "calidad sobre lo que efectivamente se le dijo al cliente.",
-        "canales": ["voz", "whatsapp", "chat", "email"],
+        "canales": ["voz", "whatsapp", "chat", "correo"],
         "modelos_operacion": ["humano", "hibrido", "automatizado"],
         "ejemplos_uso": "Una operación que ya funciona y necesita saber qué está "
                         "pasando dentro de sus conversaciones.",

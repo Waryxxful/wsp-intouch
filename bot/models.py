@@ -878,6 +878,19 @@ class SolucionInTouch(models.Model):
         ("integracion", "Integraciones"),
     ]
 
+    # El vocabulario de `canales`. Es UNO y está en español, igual que todo lo
+    # que un LLM lee en este bot: la semilla guardaba "email" mientras el prompt
+    # global, el prompt del especialista y el docstring de la tool decían
+    # "correo", así que `canal="correo"` -- la palabra que el modelo iba a usar
+    # -- devolvía lista vacía y el bot le afirmaba al contacto que InTouch no
+    # atiende por correo.
+    #
+    # `canales` es un JSONField y esto NO es su `choices`: es la lista blanca
+    # declarada que valida `bot/business/soluciones.py` y contra la que hay un
+    # test que ancla la semilla. Declarada y no derivada de las filas: derivarla
+    # haría que un canal mal escrito en la semilla se volviera "válido" solo.
+    CANALES_VALIDOS = ["whatsapp", "voz", "chat", "correo"]
+
     cliente = models.CharField(max_length=20, choices=CLIENTE_CHOICES, default="intouch")
     slug = models.SlugField(max_length=60)
     nombre = models.CharField(max_length=200)

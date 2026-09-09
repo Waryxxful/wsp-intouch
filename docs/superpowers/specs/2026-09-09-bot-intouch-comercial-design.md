@@ -184,7 +184,7 @@ class SolucionInTouch(models.Model):
     nombre = models.CharField()
     categoria = models.CharField()          # operación / agentes IA / analítica / integración
     descripcion = models.TextField()
-    canales = models.JSONField(default=list)              # whatsapp, voz, chat, email
+    canales = models.JSONField(default=list)              # whatsapp, voz, chat, correo
     modelos_operacion = models.JSONField(default=list)     # humano, hibrido, automatizado
     requiere_evaluacion_tecnica = models.BooleanField(default=False)
     ejemplos_uso = models.TextField(blank=True)
@@ -209,7 +209,7 @@ Ambos con el manager filtrado por `settings.CLIENTE_ACTIVO` (`objects`) y el sin
 filtrar (`todos_los_clientes`), igual que `Servicio` y `Sucursal`.
 
 Contenido semilla desde el prompt §2: **seis** soluciones (diseño de operación a
-medida; agentes conversacionales para WhatsApp/voz/chat/email; operación de
+medida; agentes conversacionales para WhatsApp/voz/chat/correo; operación de
 Contact Center; paneles, supervisión, dashboards y Power BI; analítica
 conversacional y control de calidad; integraciones con CRM y ERP —con
 `requiere_evaluacion_tecnica=True`—) y los tres modelos de operación.

@@ -11,7 +11,7 @@ Dos cosas que se prueban y que no son obvias:
 import asyncio
 
 from django.conf import settings
-from django.test import TestCase, TransactionTestCase
+from django.test import SimpleTestCase, TestCase, TransactionTestCase
 
 from bot.business.soluciones import (
     _consultar_solucion_impl, _listar_modelos_operacion_impl, _listar_soluciones_impl,
@@ -82,8 +82,129 @@ class ListarSolucionesTest(BaseCatalogoTest):
         resultado = _listar_soluciones_impl(categoria="integracion")
         self.assertTrue(resultado["soluciones"][0]["requiere_evaluacion_tecnica"])
 
+    def test_un_canal_desconocido_no_miente_con_lista_vacia(self):
+        # Mismo defecto que la categoría, y `canal` no se validaba. El caso
+        # medido: `canal="correo"` -- la palabra que usan el prompt global, el
+        # del especialista y el docstring de la tool -- devolvía
+        # `{"ok": True, "soluciones": []}` porque la semilla guardaba "email".
+        # El modelo lee [] como "InTouch no atiende por correo" y se lo afirma
+        # al contacto.
+        resultado = _listar_soluciones_impl(canal="fax")
+        self.assertFalse(resultado["ok"])
+        self.assertIn("canales_validos", resultado)
+
+    def test_correo_es_un_canal_valido(self):
+        # El vocabulario es UNO y está en español: "correo", no "email". Un
+        # canal válido con cero soluciones sí puede devolver lista vacía -- eso
+        # es verdad, y distinto de un canal que no existe.
+        resultado = _listar_soluciones_impl(canal="correo")
+        self.assertTrue(resultado["ok"])
+
+    def test_el_canal_se_compara_normalizado(self):
+        resultado = _listar_soluciones_impl(canal="  WhatsApp ")
+        self.assertEqual([s["slug"] for s in resultado["soluciones"]],
+                         ["agentes-conversacionales"])
+
+    def test_la_categoria_se_compara_normalizada(self):
+        # El modelo escribe "agentes ia" o "agentes_ia" según el turno.
+        for forma in ("agentes_ia", "agentes ia", "Agentes IA"):
+            with self.subTest(forma=forma):
+                resultado = _listar_soluciones_impl(categoria=forma)
+                self.assertTrue(resultado["ok"], resultado)
+                self.assertEqual([s["slug"] for s in resultado["soluciones"]],
+                                 ["agentes-conversacionales"])
+
+
+class CatalogoVacioTest(TestCase):
+    """Sin fixtures a propósito: un `CLIENTE_ACTIVO` mal puesto basta para que
+    el manager filtre por cliente y no quede ninguna fila.
+
+    Las tres tools devolvían `ok=True` con lista vacía, y eso es lo peor que
+    puede pasar: el modelo lo lee como "InTouch no ofrece nada" y se lo afirma
+    al contacto. El doctor lo cubre como FALLA en deploy, pero eso no es una
+    guarda en runtime.
+    """
+
+    def test_listar_soluciones_devuelve_un_error_explicito(self):
+        resultado = _listar_soluciones_impl()
+        self.assertFalse(resultado["ok"])
+        self.assertNotIn("soluciones", resultado)
+        self.assertIn("vacío", resultado["motivo"])
+
+    def test_consultar_solucion_no_dice_que_no_existe(self):
+        # El motivo NO puede ser "no tengo X en el catálogo": eso afirma que el
+        # catálogo se consultó y X no estaba.
+        resultado = _consultar_solucion_impl("agentes conversacionales")
+        self.assertFalse(resultado["ok"])
+        self.assertIn("vacío", resultado["motivo"])
+
+    def test_listar_modelos_operacion_devuelve_un_error_explicito(self):
+        resultado = _listar_modelos_operacion_impl()
+        self.assertFalse(resultado["ok"])
+        self.assertNotIn("modelos", resultado)
+
+
+class ElVocabularioDeCanalesEsUnoTest(SimpleTestCase):
+    """El desalineamiento medido: la semilla guardaba "email" y todos los
+    prompts decían "correo". Sin este test vuelve a pasar en silencio, porque
+    el síntoma no es una excepción sino una lista vacía.
+    """
+
+    def test_todos_los_canales_de_la_semilla_son_validos(self):
+        from bot.management.commands.seed_intouch import SOLUCIONES
+
+        validos = set(SolucionInTouch.CANALES_VALIDOS)
+        for solucion in SOLUCIONES:
+            for canal in solucion.get("canales", []):
+                with self.subTest(slug=solucion["slug"], canal=canal):
+                    self.assertIn(canal, validos)
+
+    def test_el_vocabulario_esta_en_espanol(self):
+        # Todo lo que un LLM lee en este bot va en español: "email" era el
+        # único token en inglés, y era justo el que el modelo no iba a usar.
+        self.assertIn("correo", SolucionInTouch.CANALES_VALIDOS)
+        self.assertNotIn("email", SolucionInTouch.CANALES_VALIDOS)
+
 
 class ConsultarSolucionTest(BaseCatalogoTest):
+    def test_encuentra_una_referencia_sin_tildes(self):
+        # Medido: "operacion de contact center" daba ok=False y con tilde daba
+        # ok=True. El que escribe la referencia es un LLM.
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="contact-center",
+            nombre="Operación de Contact Center", categoria="operacion",
+            descripcion="Operación completa.", orden=4,
+        )
+        resultado = _consultar_solucion_impl("operacion de contact center")
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["solucion"]["slug"], "contact-center")
+
+    def test_la_puntuacion_del_nombre_no_rompe_el_match(self):
+        # `"Paneles, supervisión y dashboards".split()` deja el token
+        # "paneles," y el subconjunto nunca calzaba.
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="paneles-y-dashboards",
+            nombre="Paneles, supervisión y dashboards", categoria="analitica",
+            descripcion="Paneles de supervisión.", orden=5,
+        )
+        resultado = _consultar_solucion_impl("paneles y dashboards")
+        self.assertTrue(resultado["ok"], resultado)
+        self.assertEqual(resultado["solucion"]["slug"], "paneles-y-dashboards")
+
+    def test_el_slug_que_devuelve_el_fallback_vuelve_a_entrar(self):
+        # EL CÍRCULO: el fallback devuelve slugs, que van sin tilde, así que el
+        # modelo reintentaba con la forma que la tool rechazaba. Cada slug que
+        # ofrecemos tiene que resolver.
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="operacion-a-medida",
+            nombre="Diseño de una operación a medida", categoria="operacion",
+            descripcion="Operación a medida.", orden=6,
+        )
+        fallback = _consultar_solucion_impl("blockchain")
+        for slug in fallback["soluciones_disponibles"]:
+            with self.subTest(slug=slug):
+                self.assertTrue(_consultar_solucion_impl(slug)["ok"])
+
     def test_encuentra_por_slug(self):
         resultado = _consultar_solucion_impl("integraciones")
         self.assertTrue(resultado["ok"])

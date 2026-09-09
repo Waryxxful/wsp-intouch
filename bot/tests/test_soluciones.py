@@ -45,11 +45,11 @@ class CamposDelCatalogoTest(TestCase):
             cliente=settings.CLIENTE_ACTIVO, slug="agentes-ia",
             nombre="Agentes conversacionales con IA", categoria="agentes_ia",
             descripcion="Agentes para varios canales.",
-            canales=["whatsapp", "voz", "chat", "email"],
+            canales=["whatsapp", "voz", "chat", "correo"],
             modelos_operacion=["automatizado", "hibrido"],
         )
         sol.refresh_from_db()
-        self.assertEqual(sol.canales, ["whatsapp", "voz", "chat", "email"])
+        self.assertEqual(sol.canales, ["whatsapp", "voz", "chat", "correo"])
         self.assertEqual(sol.modelos_operacion, ["automatizado", "hibrido"])
 
     def test_requiere_evaluacion_tecnica_por_defecto_es_falso(self):

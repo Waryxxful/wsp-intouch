@@ -3,6 +3,7 @@ conflicto. Acá viven la identidad, el tono, la ortografía, los guardrails
 duros y el marco legal.
 """
 import json
+import re
 from pathlib import Path
 
 from django.test import SimpleTestCase
@@ -60,21 +61,75 @@ class GuardrailsTest(SimpleTestCase):
 
 
 class OrtografiaTest(SimpleTestCase):
-    def test_el_prompt_va_con_tildes(self):
-        # Biblia §III.3 ley 5. El prompt global de Cavem se publicó con 0
-        # tildes contra 102 en el código y el bot le escribió "cuentame" a un
-        # contacto real. Este test es la defensa de la que salió ese hallazgo.
+    # Formas SIN tilde de palabras (o frases) que este prompt usa. Esta lista
+    # negra reemplaza a un conteo de tildes: el fallo que hay que atrapar es
+    # un prompt publicado sin acentuar -- el prompt global de otro bot de
+    # este stack salió con CERO tildes y el bot le escribió "cuentame" a un
+    # contacto real seis horas después. Un piso numérico no lo detecta y
+    # además empuja a inflar el prompt para pasar el test, que es estado de
+    # producción: fue justo lo que le pasó al implementer anterior de este
+    # test acá.
+    #
+    # Los ítems de una sola palabra se buscan como TOKEN completo, no como
+    # subcadena: "solucion" sin límite de palabra también aparece dentro de
+    # "soluciones", que está bien escrito sin tilde (el plural no la lleva).
+    # Las palabras que en español son válidas SIN tilde con otro
+    # significado -- más/mas, cómo/como, cuándo/cuando, quién/quien,
+    # está/esta, sí/si, él/el, qué/que, quedó/quedo -- no se listan sueltas:
+    # un test que grita por una palabra correcta es un test que alguien
+    # apaga. Donde vale la pena cubrirlas se usan como FRASE, con el
+    # contexto exacto de este prompt en el que la forma sin tilde no tiene
+    # ninguna lectura válida.
+    _FORMAS_SIN_TILDE = [
+        # palabras sin ninguna otra lectura válida en español
+        "cuentame", "acentua", "aqui", "asi", "atencion", "atiendelo",
+        "compania", "compartio", "contestalas", "conversacion", "decision",
+        "dias", "dificil", "envio", "estan", "exclamacion", "exito",
+        "funcion", "gestion", "implementacion", "informacion",
+        "interrogacion", "limites", "linea", "numero", "ordenalas",
+        "ortografia", "pidio", "podras", "proteccion", "proxima", "proximo",
+        "parrafo", "parrafos", "respondele", "respondelo", "respondio",
+        "reunion", "revision", "segun", "solucion", "tambien", "tendras",
+        "unico",
+        # frases: la palabra sí tiene otra lectura válida sin tilde en
+        # español, pero no en el contexto puntual en que aparece acá
+        "mas de dos",  # "más de dos" (dos preguntas); "mas" (pero) no encaja
+        "el contacto esta apurado",  # "está" (verbo), no "esta" (este/a)
+        "reunion quedo",  # "quedó" (3a persona); "quedo" (1a) no concuerda
+    ]
+
+    def test_no_hay_formas_sin_tilde(self):
+        # Reemplaza al viejo piso de "más de 60 caracteres acentuados": ese
+        # conteo no distingue un prompt bien acentuado de uno mal acentuado
+        # con relleno, y empuja a inflar el prompt para pasar el test en vez
+        # de medir el defecto real.
         from bot.flow.global_prompt import SYSTEM_PROMPT
 
-        self.assertGreater(sum(SYSTEM_PROMPT.count(c) for c in "áéíóúñ¿¡"), 60)
+        texto = SYSTEM_PROMPT.lower()
+        texto_plano = " ".join(texto.split())
+        tokens = set(re.findall(r"[a-záéíóúñ]+", texto))
+
+        encontradas = [
+            forma
+            for forma in self._FORMAS_SIN_TILDE
+            if (forma in texto_plano if " " in forma else forma in tokens)
+        ]
+        self.assertEqual(
+            encontradas,
+            [],
+            "formas sin tilde en el prompt global: " + ", ".join(encontradas),
+        )
 
     def test_la_regla_de_ortografia_esta_escrita_con_tildes(self):
         # El ejemplo de la regla ES corpus: la versión anterior traía
-        # "cuentame" sin tilde y le enseñó exactamente eso.
+        # "cuentame" sin tilde y le enseñó exactamente eso. Cubre las dos
+        # mitades del fallo histórico: que la forma incorrecta no esté, y
+        # que la correcta sí esté.
         from bot.flow.global_prompt import SYSTEM_PROMPT
 
         self.assertNotIn("cuentame", SYSTEM_PROMPT)
         self.assertNotIn(" ano ", SYSTEM_PROMPT)
+        self.assertIn("cuéntame", SYSTEM_PROMPT)
 
 
 class MensajesLargosTest(SimpleTestCase):

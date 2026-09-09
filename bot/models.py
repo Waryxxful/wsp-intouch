@@ -1,3 +1,4 @@
+import dataclasses
 import json
 from datetime import timedelta
 
@@ -927,3 +928,139 @@ class ModeloOperacion(models.Model):
 
     def __str__(self):
         return self.nombre
+
+
+class LeadInTouch(models.Model):
+    """El lead comercial B2B, con los 21 campos del contrato del prompt §8.
+
+    Uno por conversación (OneToOne) a propósito: el lead se va completando a
+    medida que avanza el chat, no se crea uno por turno. Es la primera de las
+    tres capas de idempotencia del spec §7.5, y la única que es estructural --
+    la garantiza la tabla, no el código.
+
+    El teléfono NO es un campo: llega de los metadatos de WhatsApp y vive en
+    Conversation.wa_id. El prompt prohíbe pedírselo al contacto.
+
+    `lead_score` lo escribe `calcular_lead_score` (código), nunca el LLM.
+    """
+
+    SCORE_CHOICES = [("HOT", "HOT"), ("WARM", "WARM"), ("COLD", "COLD"),
+                     ("NO_CALIFICADO", "No calificado")]
+    SITUACION_CC_CHOICES = [("tiene", "Tiene"), ("no_tiene", "No tiene")]
+    TIPO_CC_CHOICES = [("propio", "Propio"), ("externalizado", "Externalizado"),
+                       ("mixto", "Mixto"), ("no_tiene", "No tiene")]
+    # Los siete valores del prompt §4. "otro" significa que el contacto indicó
+    # una categoría distinta -- NO se usa para reemplazar un subtipo desconocido,
+    # que se representa con la cadena vacía.
+    SUBTIPO_AUTOMOTRIZ_CHOICES = [
+        ("importador", "Importador"), ("concesionario", "Concesionario"),
+        ("automotora", "Automotora"), ("servicio_tecnico", "Servicio Técnico"),
+        ("rent_a_car", "Rent a Car"), ("financiera", "Financiera Automotriz"),
+        ("otro", "Otro"),
+    ]
+
+    conversation = models.OneToOneField(
+        Conversation, on_delete=models.CASCADE, related_name="lead_intouch")
+
+    # Identificación
+    nombre_completo = models.CharField(max_length=200, blank=True, default="")
+    correo = models.CharField(max_length=200, blank=True, default="")
+    empresa = models.CharField(max_length=200, blank=True, default="")
+    industria = models.CharField(max_length=120, blank=True, default="")
+    subtipo_automotriz = models.CharField(
+        max_length=20, choices=SUBTIPO_AUTOMOTRIZ_CHOICES, blank=True, default="")
+    cargo = models.CharField(max_length=120, blank=True, default="")
+    pais_ciudad = models.CharField(max_length=120, blank=True, default="")
+
+    # Diagnóstico
+    situacion_contact_center = models.CharField(
+        max_length=10, choices=SITUACION_CC_CHOICES, blank=True, default="")
+    tipo_contact_center = models.CharField(
+        max_length=15, choices=TIPO_CC_CHOICES, blank=True, default="")
+    usa_ia_actualmente = models.BooleanField(null=True, blank=True)
+    canales_actuales = models.JSONField(default=list, blank=True)
+    volumen_interacciones = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="Como lo dijo el contacto, conservando período y unidad.")
+    necesidad_principal = models.TextField(blank=True, default="")
+    soluciones_interes = models.JSONField(default=list, blank=True)
+    intencion = models.CharField(max_length=200, blank=True, default="")
+    plazo_proyecto = models.CharField(max_length=120, blank=True, default="")
+
+    # Calificación
+    lead_score = models.CharField(
+        max_length=15, choices=SCORE_CHOICES, blank=True, default="",
+        help_text="Lo escribe calcular_lead_score (código), nunca el LLM.")
+    solicita_consultoria = models.BooleanField(default=False)
+    solicita_contacto_humano = models.BooleanField(default=False)
+
+    # Cierre
+    resumen_conversacion = models.TextField(blank=True, default="")
+    siguiente_accion_recomendada = models.TextField(blank=True, default="")
+
+    # Trazabilidad
+    creado = models.DateTimeField(auto_now_add=True)
+    actualizado = models.DateTimeField(auto_now=True)
+    notificado_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo se notificó como HOT. Sella la notificación para que "
+                  "no se repita en cada turno.")
+    despachado_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo se despachó al destino externo. Nulo con LEAD_SINK=none, "
+                  "y nulo tras un fallo: un lead sin despachar tiene que ser visible.")
+
+    class Meta:
+        ordering = ["-actualizado"]
+
+    def __str__(self):
+        quien = self.empresa or self.nombre_completo or self.conversation.wa_id
+        return f"{quien} ({self.lead_score or 'sin calificar'})"
+
+    def save(self, *args, **kwargs):
+        # Las reglas de consistencia del prompt §8 se aplican en código y no se
+        # le confían al prompt: un lead que dice "no tiene Contact Center" y a
+        # la vez "propio" es una contradicción que el equipo comercial no puede
+        # resolver mirando la fila.
+        if self.situacion_contact_center == "no_tiene":
+            self.tipo_contact_center = "no_tiene"
+        elif not self.situacion_contact_center:
+            self.tipo_contact_center = ""
+        super().save(*args, **kwargs)
+
+
+@dataclasses.dataclass(frozen=True)
+class SenalesLead:
+    """Lo que el extractor observa en la conversación.
+
+    Son señales verificables, no un veredicto: el extractor dice qué pasó y
+    `calcular_lead_score` decide qué significa. Ver spec §7.3.
+    """
+    encaje_con_oferta: bool = False
+    necesidad_concreta: bool = False
+    interes_evaluar: bool = False
+    solicita_siguiente_paso: bool = False
+    intencion_avanzar_declarada: bool = False
+    plazo_cercano_declarado: bool = False
+    interes_exploratorio: bool = False
+
+
+def calcular_lead_score(senales: SenalesLead) -> str:
+    """La precedencia del prompt §6: HOT, luego WARM, luego COLD, si no
+    NO_CALIFICADO.
+
+    Se calcula acá y no en el prompt porque el resultado tiene que ser
+    reproducible: el mismo lead no puede salir HOT o WARM según el humor del
+    modelo en ese turno. El prompt §6 sigue existiendo como criterio de qué
+    evidencia recoger; lo que sale del prompt es el veredicto.
+    """
+    if not senales.encaje_con_oferta:
+        return "NO_CALIFICADO"
+    if (senales.necesidad_concreta and senales.solicita_siguiente_paso
+            and (senales.intencion_avanzar_declarada or senales.plazo_cercano_declarado)):
+        return "HOT"
+    if senales.necesidad_concreta and senales.interes_evaluar:
+        return "WARM"
+    if senales.interes_exploratorio:
+        return "COLD"
+    return "NO_CALIFICADO"

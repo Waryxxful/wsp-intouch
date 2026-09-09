@@ -442,12 +442,18 @@ def chequear_prompt_contra_fixture(opciones):
     faltar en silencio: si `bot/fixtures/prompt_comercial.md` no esta, eso es
     FALLA, no una comparacion salteada. Ausencia distinta de divergencia: sin
     el archivo no hay nada contra que comparar, y eso es peor que encontrar una
-    diferencia."""
+    diferencia.
+
+    `opciones["fixture_comercial"]` permite inyectar una ruta distinta a la
+    real del repo -- lo usan los tests para probar los casos "presente" y
+    "ausente" sin tocar el archivo trackeado. El CLI real nunca pasa esta
+    clave, asi que en produccion siempre se usa la ruta del repo."""
     import difflib
     from bot.flow.global_prompt import GLOBAL_PROMPT_SLUG, SYSTEM_PROMPT
     from bot.models import get_active_prompt
 
-    fixture_comercial = settings.BASE_DIR / "bot" / "fixtures" / "prompt_comercial.md"
+    fixture_comercial = opciones.get("fixture_comercial") or (
+        settings.BASE_DIR / "bot" / "fixtures" / "prompt_comercial.md")
     pares = [(GLOBAL_PROMPT_SLUG, SYSTEM_PROMPT, "bot/flow/global_prompt.py::SYSTEM_PROMPT")]
     if fixture_comercial.is_file():
         pares.append(("comercial", fixture_comercial.read_text(encoding="utf-8"),

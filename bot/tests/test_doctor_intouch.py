@@ -4,6 +4,7 @@ La regla de oro de este archivo: un doctor que cría lobos deja de leerse. Un
 chequeo que falla siempre -- como pedir sucursales a un bot que no las tiene --
 enseña a ignorar la salida completa.
 """
+import tempfile
 from pathlib import Path
 
 from django.conf import settings
@@ -113,39 +114,52 @@ class PromptContraFixtureTest(TestCase):
     """Hallazgo de una task anterior: `chequear_prompt_contra_fixture` se
     degradaba en silencio cuando el fixture no estaba (pasó de verdad: una
     task anterior borró bot/fixtures/prompt_ventas.md y el chequeo dejó de
-    correr, cero fallas). Reapuntado a bot/fixtures/prompt_comercial.md (la
-    Task 8 todavía no lo crea), la ausencia tiene que ser FALLA.
+    correr, cero fallas). Reapuntado a bot/fixtures/prompt_comercial.md, la
+    ausencia tiene que ser FALLA.
 
-    Los dos casos -- presente y ausente -- se prueban sin depender de que el
-    archivo esté: el caso "ausente" usa el estado real del repo (hoy no
-    existe) y el caso "presente" lo crea y lo borra dentro del propio test."""
+    `chequear_prompt_contra_fixture` acepta `opciones["fixture_comercial"]`
+    para que estos tests prueben los casos "presente" y "ausente" contra una
+    ruta temporal, nunca contra bot/fixtures/prompt_comercial.md -- ese
+    archivo está trackeado en git y es el prompt real del especialista
+    comercial en producción. Ningún test de este archivo lo lee, escribe ni
+    borra."""
 
-    RUTA = Path(__file__).resolve().parents[1] / "fixtures" / "prompt_comercial.md"
+    def setUp(self):
+        self._tmpdir = tempfile.TemporaryDirectory()
+        self.addCleanup(self._tmpdir.cleanup)
+        # No existe hasta que un test lo escriba: cubre el caso "ausente"
+        # sin depender del estado del repo.
+        self.ruta_tmp = Path(self._tmpdir.name) / "prompt_comercial.md"
 
-    def _correr(self):
+    def _correr(self, ruta=None):
         from bot.management.commands.doctor import chequear_prompt_contra_fixture
 
-        return list(chequear_prompt_contra_fixture({}))
+        opciones = {"fixture_comercial": ruta} if ruta is not None else {}
+        return list(chequear_prompt_contra_fixture(opciones))
 
     def _fallas_del_fixture(self, hallazgos):
         return [h for h in hallazgos if h.nivel == FALLA
                 and "prompt_comercial.md" in h.titulo]
 
+    def test_fixture_real_del_repo_esta_presente(self):
+        # El estado real del repo hoy es "presente" (lo crea la Task 8). Este
+        # test corre el chequeo con la ruta real (sin override) y confirma
+        # que no hay FALLA por ausencia -- sin escribir ni borrar nada.
+        ruta_real = Path(__file__).resolve().parents[1] / "fixtures" / "prompt_comercial.md"
+        self.assertTrue(ruta_real.is_file(), "este test asume el estado real del repo")
+        self.assertEqual(self._fallas_del_fixture(self._correr()), [])
+
     def test_fixture_ausente_es_falla_no_silencio(self):
-        self.assertFalse(self.RUTA.is_file(), "este test asume el estado real del repo")
-        fallas = self._fallas_del_fixture(self._correr())
-        self.assertEqual(len(fallas), 1, self._correr())
+        self.assertFalse(self.ruta_tmp.is_file())
+        fallas = self._fallas_del_fixture(self._correr(self.ruta_tmp))
+        self.assertEqual(len(fallas), 1, fallas)
         # Accionable: qué falta y qué lo crea.
         self.assertIn("prompt_comercial.md", fallas[0].titulo)
         self.assertIn("Task 8", fallas[0].detalle)
 
     def test_fixture_presente_no_es_falla(self):
-        self.RUTA.parent.mkdir(parents=True, exist_ok=True)
-        self.RUTA.write_text("Contenido de prueba del prompt comercial.", encoding="utf-8")
-        try:
-            hallazgos = self._correr()
-        finally:
-            self.RUTA.unlink()
+        self.ruta_tmp.write_text("Contenido de prueba del prompt comercial.", encoding="utf-8")
+        hallazgos = self._correr(self.ruta_tmp)
         self.assertEqual(self._fallas_del_fixture(hallazgos), [])
 
     def test_menciona_seed_intouch_y_no_seed_cavem(self):
@@ -154,13 +168,9 @@ class PromptContraFixtureTest(TestCase):
         # necesita el fixture presente para que la comparación se ejecute.
         from bot.models import save_prompt_version
 
-        self.RUTA.parent.mkdir(parents=True, exist_ok=True)
-        self.RUTA.write_text("Contenido de git.", encoding="utf-8")
+        self.ruta_tmp.write_text("Contenido de git.", encoding="utf-8")
         save_prompt_version("comercial", "Un prompt distinto al que hay en git.")
-        try:
-            hallazgos = self._correr()
-        finally:
-            self.RUTA.unlink()
+        hallazgos = self._correr(self.ruta_tmp)
         avisos = [h for h in hallazgos if h.nivel == "aviso" and "comercial" in h.titulo]
         self.assertTrue(avisos, hallazgos)
         self.assertIn("seed_intouch", avisos[0].detalle)

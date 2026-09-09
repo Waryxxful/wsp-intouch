@@ -1,0 +1,93 @@
+services:
+  web:
+    build: .
+    ports:
+      - "8040:8000"
+    env_file:
+      - .env.docker
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings_docker
+    volumes:
+      # Bind-mount del repo completo -- antes el codigo quedaba horneado en
+      # la imagen (COPY . . en el Dockerfile), asi que cualquier cambio
+      # (aunque fuera solo una tool) exigia rebuild + recreate del
+      # contenedor entero: parar, arrancar de cero, correr migrate/
+      # collectstatic otra vez, con un hueco real sin aceptar trafico en el
+      # medio (causa confirmada de gaps sin respuesta en WhatsApp durante
+      # deploys, ver docs/PENDIENTES.md). Con el codigo montado, un cambio
+      # en disco ya esta adentro del contenedor sin rebuildear nada -- solo
+      # falta que gunicorn recargue sus workers (`docker exec wsp_demo-web-1
+      # kill -HUP 1`, ver el comentario "exec gunicorn" en el Dockerfile).
+      # Los montajes mas especificos de abajo (dios.json, media_data) van
+      # DESPUES en la lista para que sigan pisando a este mount general.
+      - .:/app
+      - ./dios.json:/app/dios.json:ro
+      # MEDIA_ROOT (settings.py) = BASE_DIR / "media" = /app/media dentro del
+      # contenedor. Sin este volumen, un rebuild/recreate del contenedor
+      # borraria las imagenes JPEG convertidas mientras el registro
+      # ImagenConvertida (en la BD real, fuera del contenedor) seguiria
+      # existiendo -- resolver_imagen_modelo encontraria el cache "existente"
+      # y devolveria una URL que apunta a un archivo que ya no esta en disco,
+      # sin volver a descargar/convertir nunca (ver Global Constraints del plan).
+      - media_data:/app/media
+      # WHATSAPP_MEDIA_ROOT (settings.py) = BASE_DIR / "media_private" /
+      # "whatsapp" = /app/media_private/whatsapp dentro del contenedor --
+      # fotos/audios que mandan los clientes por WhatsApp (bot/whatsapp/
+      # media_storage.py). Directorio separado de media_data/MEDIA_ROOT a
+      # proposito: MEDIA_ROOT se sirve publico y sin auth (config/urls.py::
+      # serve_media, pensado para fotos de catalogo); esto es dato personal,
+      # se sirve solo con @login_required (admin_panel.views.api_media_file).
+      # Mismo motivo que media_data: sin este volumen, un rebuild/recreate
+      # del contenedor borraria los adjuntos ya guardados mientras el
+      # registro en Message.media_url (BD real, fuera del contenedor)
+      # seguiria apuntando a un archivo que ya no existe.
+      - whatsapp_media_data:/app/media_private
+    # `command` PISA al CMD del Dockerfile, y esta duplicado a proposito: el
+    # preambulo (migrate/collectstatic) tiene que seguir corriendo igual, asi
+    # que se copio literal y lo UNICO que cambia son los flags de gunicorn. Si
+    # alguna vez se toca el CMD del Dockerfile, hay que tocar esto tambien.
+    #
+    # Va aca y no en el Dockerfile para que cambiarlo NO exija rebuild de la
+    # imagen: `docker compose up -d web` alcanza, y revertir es borrar estas
+    # lineas.
+    #
+    # POR QUE gthread CON THREADS (medido el 2026-09-03):
+    # El worker `sync` por defecto atiende UN request a la vez, y un turno de
+    # WhatsApp retiene su worker ~12s (casi todo esperando HTTP de OpenRouter).
+    # Con --workers 2 la capacidad dura eran 2 turnos en vuelo: la cola se
+    # sentia con 4 conversaciones simultaneas y saturaba con 5 (rho=1,08), y el
+    # 3er mensaje simultaneo esperaba en el backlog del socket sin dejar rastro
+    # en ninguna traza -- invisible en Langfuse.
+    #
+    # Se eligio threads en vez de mas procesos por la MEMORIA de este host:
+    # cada worker pesa 176MB medidos, y casi todo es libreria importada
+    # (Django/LangChain/LangGraph) que los threads SI comparten. Este host
+    # corre ademas wsp_demo, wsp_pompeyo, orquestador y call_reviews con 3,7GB
+    # libres; 8 procesos se habrian comido ~1GB de ese headroom compartido,
+    # mientras 2x8 threads dan 16 slots por ~380MB.
+    #
+    # Es seguro para esta carga porque el trabajo es 100% I/O-bound (esperar a
+    # OpenRouter) y los singletons de modulo son thread-safe: httpx.Client
+    # (documentado), el grafo compilado de LangGraph (el estado viaja por
+    # invocacion), los ThreadPoolExecutor de cola_envio y el SDK de Langfuse.
+    # Django ya usa conexiones a la BD por thread.
+    #
+    # Ojo si se vuelve a --workers N: los schedulers de fondo
+    # (bot/seguimiento.py, bot/scraping/scheduler.py) se guardan con un
+    # `_started` global que es POR PROCESO, asi que N procesos = N copias del
+    # loop. Hoy no duplica mensajes porque enviar_seguimiento hace un claim con
+    # get_or_create sobre la UniqueConstraint de CampaignSend antes de mandar,
+    # pero con threads el problema no existe: siguen siendo 2 procesos.
+    command: >
+      sh -c "python manage.py migrate leads --database=qaintouch --noinput &&
+      python manage.py migrate --noinput &&
+      python manage.py collectstatic --noinput &&
+      exec gunicorn config.wsgi:application --bind 0.0.0.0:8000
+      --worker-class gthread --workers 2 --threads 8
+      --timeout 120 --access-logfile - --error-logfile -
+      --log-level info --capture-output"
+    restart: unless-stopped
+
+volumes:
+  media_data:
+  whatsapp_media_data:

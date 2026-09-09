@@ -1,0 +1,24 @@
+{
+  "nombre": "Asesor Comercial IA — InTouch",
+  "url_interna": "http://172.20.21.249:8040",
+  "url_publica": "/wsp/intouch/",
+  "icono": "feather-headphones",
+  "categoria": "Bots",
+  "descripcion": "Agente comercial B2B: orienta sobre las soluciones de InTouch, califica la oportunidad y registra el lead",
+  "secret": "<DIOS_REGISTER_SECRET>",
+  "modo": "spa_remote",
+  "slug": "intouch",
+  "route_prefix": "/wsp/intouch/",
+  "remote_entry_url": "/mf/wsp_intouch/remoteEntry.js",
+  "remote_scope": "wsp_intouch",
+  "contract_version": "1",
+  "nav": [
+    { "label": "Dashboard", "icon": "feather-bar-chart-2", "inner": "/wsp/intouch/" },
+    { "label": "Chats", "icon": "feather-message-square", "inner": "/wsp/intouch/chat" },
+    { "label": "Leads", "icon": "feather-user-check", "inner": "/wsp/intouch/leads" },
+    { "label": "Configuración", "icon": "feather-settings", "inner": "/wsp/intouch/settings" }
+  ],
+  "source_host": "172.20.21.50",
+  "source_db": "QAIntouch",
+  "schemas": ["intouch"]
+}

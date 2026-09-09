@@ -857,3 +857,73 @@ class Campana(models.Model):
             "leads": leads,
             "conversiones": conversiones,
         }
+
+
+class SolucionInTouch(models.Model):
+    """Catálogo de soluciones que el bot puede ofrecer.
+
+    Va a tabla y no al prompt a propósito (spec §5.1): el guardrail "no
+    inventes integraciones, capacidades ni certificaciones" sólo es cumplible
+    si la lista sale de una fila. Es el mismo argumento por el que un precio
+    no puede vivir en un chunk vectorial (biblia §III.5).
+
+    Editable desde el panel, así que agregar una solución no necesita deploy.
+    """
+
+    CATEGORIA_CHOICES = [
+        ("operacion", "Diseño de operación"),
+        ("agentes_ia", "Agentes conversacionales con IA"),
+        ("analitica", "Analítica y control de calidad"),
+        ("integracion", "Integraciones"),
+    ]
+
+    cliente = models.CharField(max_length=20, choices=CLIENTE_CHOICES, default="intouch")
+    slug = models.SlugField(max_length=60)
+    nombre = models.CharField(max_length=200)
+    categoria = models.CharField(max_length=20, choices=CATEGORIA_CHOICES)
+    descripcion = models.TextField()
+    canales = models.JSONField(default=list, blank=True)
+    modelos_operacion = models.JSONField(default=list, blank=True)
+    requiere_evaluacion_tecnica = models.BooleanField(
+        default=False,
+        help_text="El prompt exige presentarla como sujeta a evaluación técnica.")
+    ejemplos_uso = models.TextField(blank=True, default="")
+    activa = models.BooleanField(default=True)
+    orden = models.IntegerField(default=0)
+
+    objects = _ClienteActivoManager()
+    todos_los_clientes = models.Manager()
+
+    class Meta:
+        ordering = ["orden", "nombre"]
+        constraints = [
+            models.UniqueConstraint(fields=["cliente", "slug"], name="unica_solucion_por_cliente"),
+        ]
+
+    def __str__(self):
+        return self.nombre
+
+
+class ModeloOperacion(models.Model):
+    """Los tres modelos de operación del prompt §2: humano, híbrido y
+    automatizado. Conjunto cerrado, y por eso el bot los lee de una tabla en
+    vez de recordarlos."""
+
+    cliente = models.CharField(max_length=20, choices=CLIENTE_CHOICES, default="intouch")
+    slug = models.SlugField(max_length=30)
+    nombre = models.CharField(max_length=100)
+    descripcion = models.TextField()
+    cuando_aplica = models.TextField()
+    orden = models.IntegerField(default=0)
+
+    objects = _ClienteActivoManager()
+    todos_los_clientes = models.Manager()
+
+    class Meta:
+        ordering = ["orden"]
+        constraints = [
+            models.UniqueConstraint(fields=["cliente", "slug"], name="unico_modelo_operacion_por_cliente"),
+        ]
+
+    def __str__(self):
+        return self.nombre

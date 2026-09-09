@@ -159,6 +159,39 @@ def chequear_rag_schema(opciones):
         yield Hallazgo(OK, f"RAG_SCHEMA = {schema}")
 
 
+def chequear_schema_efectivo(opciones):
+    """El schema donde el bot escribe DE VERDAD.
+
+    `DB_SCHEMA` en el `.env` es decorativo: `OPTIONS["database_schema"]` no es
+    una opción real de mssql-django y se ignora en silencio. El schema efectivo
+    lo fija el `DEFAULT_SCHEMA` del login SQL, así que reusar el login de otro
+    bot hace que este escriba en la producción del otro -- pasó el 2026-09-02,
+    con las ScrapedPage de un bot apuntando a la base de otro.
+
+    Consulta la BD del bot, no un servicio externo: no sale a la red, así que
+    corre también con --sin-red (ver CHEQUEOS_CON_RED). Sin equivalente en
+    SQLite, así que ahí se saltea con un OK explicativo en vez de fallar.
+    """
+    from django.db import connection
+
+    if connection.vendor != "microsoft":
+        yield Hallazgo(OK, "no es SQL Server, no aplica el chequeo de schema")
+        return
+    declarado = (getattr(settings, "DB_SCHEMA", "") or "").strip()
+    with connection.cursor() as cursor:
+        cursor.execute("select DB_NAME(), SCHEMA_NAME(), CURRENT_USER")
+        base, schema, usuario = cursor.fetchone()
+    if declarado and schema != declarado:
+        yield Hallazgo(
+            FALLA, f"el schema efectivo es '{schema}' y DB_SCHEMA dice '{declarado}'",
+            f"login '{usuario}' en la base '{base}'. El schema lo fija el "
+            f"DEFAULT_SCHEMA del login, no el .env: este bot está escribiendo en "
+            f"'{schema}', que puede ser la producción de otro bot.",
+        )
+        return
+    yield Hallazgo(OK, f"schema efectivo '{schema}'", f"base '{base}', login '{usuario}'")
+
+
 def chequear_langfuse(opciones):
     faltan = [n for n in ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY") if _falta(os.environ.get(n))]
     if faltan:
@@ -402,16 +435,32 @@ def chequear_prompts_activos(opciones):
 def chequear_prompt_contra_fixture(opciones):
     """El prompt activo vive en la BD y se edita desde el panel; el fixture es
     la copia en git. Nada las reconcilia, y esa divergencia ya bloqueo un
-    deploy (docs/PENDIENTES.md 32.a)."""
+    deploy (docs/PENDIENTES.md 32.a) -- en el bot hermano fue el chequeo que
+    detecto que los prompts activos en produccion habian perdido las tildes.
+
+    Es el chequeo mas valioso del doctor, asi que su fixture NO puede
+    faltar en silencio: si `bot/fixtures/prompt_comercial.md` no esta, eso es
+    FALLA, no una comparacion salteada. Ausencia distinta de divergencia: sin
+    el archivo no hay nada contra que comparar, y eso es peor que encontrar una
+    diferencia."""
     import difflib
     from bot.flow.global_prompt import GLOBAL_PROMPT_SLUG, SYSTEM_PROMPT
     from bot.models import get_active_prompt
 
-    fixture_ventas = settings.BASE_DIR / "bot" / "fixtures" / "prompt_ventas.md"
+    fixture_comercial = settings.BASE_DIR / "bot" / "fixtures" / "prompt_comercial.md"
     pares = [(GLOBAL_PROMPT_SLUG, SYSTEM_PROMPT, "bot/flow/global_prompt.py::SYSTEM_PROMPT")]
-    if fixture_ventas.is_file():
-        pares.append(("custom:ventas", fixture_ventas.read_text(encoding="utf-8"),
-                      "bot/fixtures/prompt_ventas.md"))
+    if fixture_comercial.is_file():
+        pares.append(("comercial", fixture_comercial.read_text(encoding="utf-8"),
+                      "bot/fixtures/prompt_comercial.md"))
+    else:
+        yield Hallazgo(
+            FALLA, "falta bot/fixtures/prompt_comercial.md",
+            "sin el fixture, este chequeo no puede comparar el prompt activo del "
+            "especialista comercial contra su version en git, y una edicion desde el "
+            "panel que le borre las tildes o le pida una tool que no existe pasa "
+            "desapercibida. Lo crea la Task 8 (el especialista comercial) del plan de "
+            ".superpowers/sdd/2026-09-09-bot-intouch-comercial/.",
+        )
 
     for agente, en_git, origen in pares:
         activo = get_active_prompt(agente)
@@ -429,7 +478,7 @@ def chequear_prompt_contra_fixture(opciones):
             AVISO, f"el prompt activo de {agente} difiere de {origen}",
             f"{len(diferencias)} lineas distintas. Primeras: "
             + " | ".join(d[:90] for d in diferencias[:3])
-            + ". Si el codigo es lo correcto: `seed_cavem --republicar-prompt`.",
+            + ". Si el codigo es lo correcto: `manage.py seed_intouch --republicar-prompt`.",
         )
 
 
@@ -504,58 +553,53 @@ def chequear_tools_del_prompt_global(opciones):
 # datos
 # --------------------------------------------------------------------------
 
-def chequear_sucursales(opciones):
-    from bot.models import Sucursal
-    sucursales = list(Sucursal.objects.all())
-    if not sucursales:
+def chequear_catalogo_intouch(opciones):
+    """El catálogo es la única fuente de lo que el bot puede afirmar.
+
+    Es FALLA y no aviso: sin soluciones cargadas, `listar_soluciones` devuelve
+    una lista vacía, el bot no puede decir qué hace InTouch y el guardrail
+    "no inventes capacidades" lo deja mudo. Un bot que no puede hablar de su
+    producto no está listo para producción.
+
+    NO se chequean sucursales ni stock: este bot no los tiene, y un chequeo que
+    falla siempre enseña a ignorar la salida completa del doctor.
+    """
+    from bot.models import ModeloOperacion, SolucionInTouch
+
+    soluciones = list(SolucionInTouch.objects.filter(activa=True))
+    if not soluciones:
         yield Hallazgo(
-            FALLA, "no hay ninguna Sucursal cargada",
-            "buscar_sucursales_cercanas no tiene que devolver y el bot deriva todo a un humano.",
+            FALLA, "no hay ninguna solución activa en el catálogo",
+            "`manage.py seed_intouch`. Sin catálogo, listar_soluciones no tiene "
+            "qué devolver y el bot no puede afirmar nada de lo que InTouch hace.",
         )
-        return
-    yield Hallazgo(OK, f"{len(sucursales)} sucursal(es) cargada(s)")
-
-    sin_coords = [s.nombre for s in sucursales if s.latitud is None or s.longitud is None]
-    if sin_coords:
-        yield Hallazgo(
-            AVISO, "hay sucursales sin coordenadas",
-            ", ".join(sin_coords) + " -- quedan fuera del ranking por distancia "
-            "(`manage.py geocode_sucursales`).",
-        )
-    sin_categorias = [s.nombre for s in sucursales if not s.categorias]
-    if sin_categorias:
-        yield Hallazgo(AVISO, "hay sucursales sin categorias", ", ".join(sin_categorias))
-
-    if len(sucursales) > 1 and _falta(getattr(settings, "GOOGLE_MAPS_API_KEY", "")):
-        yield Hallazgo(
-            FALLA, "hay mas de una sucursal y falta GOOGLE_MAPS_API_KEY",
-            "sin esa key el bot no puede responder 'cual me queda mas cerca'.",
-        )
-
-
-def chequear_catalogo_de_negocio(opciones):
-    from bot.models import Servicio
-    servicios = Servicio.objects.count()
-    if servicios:
-        yield Hallazgo(OK, f"{servicios} servicio(s) cargado(s)")
     else:
-        yield Hallazgo(
-            AVISO, "no hay Servicios cargados",
-            "el especialista de agendamiento no tiene que ofrecer.",
-        )
+        yield Hallazgo(OK, f"{len(soluciones)} solución(es) activa(s) en el catálogo")
 
-    try:
-        from bot.models import VehiculoUsado
-    except ImportError:
-        return
-    stock = VehiculoUsado.objects.count()
-    if stock:
-        yield Hallazgo(OK, f"{stock} vehiculo(s) en stock")
-    else:
+        sin_descripcion = [s.slug for s in soluciones if not s.descripcion.strip()]
+        if sin_descripcion:
+            yield Hallazgo(
+                AVISO, "hay soluciones sin descripción", ", ".join(sin_descripcion)
+                + " -- el bot las va a nombrar sin poder explicarlas.",
+            )
+        sin_canales = [s.slug for s in soluciones
+                       if s.categoria == "agentes_ia" and not s.canales]
+        if sin_canales:
+            yield Hallazgo(
+                AVISO, "hay soluciones de agentes sin canales declarados",
+                ", ".join(sin_canales),
+            )
+
+    modelos = {m.slug for m in ModeloOperacion.objects.all()}
+    faltan = {"humano", "hibrido", "automatizado"} - modelos
+    if faltan:
         yield Hallazgo(
-            AVISO, "no hay stock cargado (VehiculoUsado)",
-            "si este bot cotiza usados, `manage.py importar_stock_cavem`.",
+            FALLA, "faltan modelos de operación",
+            ", ".join(sorted(faltan)) + " -- el prompt los presenta como un "
+            "conjunto cerrado de tres, y el bot los lee de la tabla.",
         )
+    else:
+        yield Hallazgo(OK, "los tres modelos de operación están cargados")
 
 
 # --------------------------------------------------------------------------
@@ -592,13 +636,13 @@ def chequear_whatsapp(opciones):
 
 SECCIONES = {
     "config": [chequear_variables_obligatorias, chequear_cliente_activo,
-               chequear_rag_schema, chequear_langfuse],
+               chequear_rag_schema, chequear_schema_efectivo, chequear_langfuse],
     "modelos": [chequear_modelos_declarados, chequear_orden_de_proveedores,
                 chequear_catalogo_openrouter],
     "rag": [chequear_dimension_embeddings, chequear_supabase],
     "prompts": [chequear_prompts_activos, chequear_prompt_contra_fixture,
                 chequear_tools_del_prompt, chequear_tools_del_prompt_global],
-    "datos": [chequear_sucursales, chequear_catalogo_de_negocio],
+    "datos": [chequear_catalogo_intouch],
     "whatsapp": [chequear_whatsapp],
 }
 

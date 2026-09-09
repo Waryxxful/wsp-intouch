@@ -25,7 +25,7 @@ from bot.management.commands.doctor import (
     chequear_rag_schema, chequear_tools_del_prompt, chequear_variables_obligatorias,
     _universo_de_tools,
 )
-from bot.models import CustomSpecialist, Sucursal, save_prompt_version
+from bot.models import CustomSpecialist, SolucionInTouch, save_prompt_version
 
 _RE_EFFORT = re.compile(r'"effort"\s*:\s*"(\w+)"')
 
@@ -249,9 +249,9 @@ class ComandoTest(TestCase):
         self.assertNotIn("whatsapp", salida.getvalue())
 
     def test_sale_con_error_si_hay_una_falla(self):
-        """La BD de test no tiene sucursales, asi que la seccion `datos` falla:
-        sirve como caso real de puerta de deploy."""
-        self.assertFalse(Sucursal.objects.exists())
+        """La BD de test no tiene soluciones en el catalogo, asi que la
+        seccion `datos` falla: sirve como caso real de puerta de deploy."""
+        self.assertFalse(SolucionInTouch.objects.exists())
         with self.assertRaises(CommandError):
             call_command("doctor", "--seccion", "datos", "--sin-red",
                          stdout=StringIO(), stderr=StringIO())

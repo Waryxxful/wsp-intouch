@@ -18,9 +18,14 @@ from bot.business.compliance import (
     _registrar_no_contactar_impl, _registrar_consentimiento_impl, _crear_caso_impl,
     registrar_no_contactar, registrar_consentimiento, crear_caso,
 )
+from bot.business.soluciones import (
+    _consultar_solucion_impl, _listar_modelos_operacion_impl, _listar_soluciones_impl,
+    consultar_solucion, listar_modelos_operacion, listar_soluciones,
+)
 
 __all__ = [
     "consultar_disponibilidad", "agendar_hora", "buscar_reserva", "reagendar_hora", "anular_hora",
     "listar_catalogo", "buscar_sucursales_cercanas",
     "registrar_no_contactar", "registrar_consentimiento", "crear_caso",
+    "listar_soluciones", "consultar_solucion", "listar_modelos_operacion",
 ]

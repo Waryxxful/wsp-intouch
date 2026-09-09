@@ -87,7 +87,7 @@ SETTINGS_DE_MODELO = [
 MODULOS_CON_TOOLS = [
     "bot.business.agendamiento", "bot.business.catalogo", "bot.business.compliance",
     "bot.business.ventas", "bot.business.usados", "bot.business.prospeccion",
-    "bot.business.encuestas", "bot.rag.tool", "bot.flow.respuesta",
+    "bot.business.encuestas", "bot.business.soluciones", "bot.rag.tool", "bot.flow.respuesta",
 ]
 
 

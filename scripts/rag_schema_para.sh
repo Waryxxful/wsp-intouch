@@ -24,9 +24,14 @@ if [[ -z "$cliente" ]]; then
 fi
 
 # La lista valida se lee de bot/models.py para no duplicarla acá y que se
-# desincronice al agregar una marca.
-mapfile -t validos < <(grep -oE '^CLIENTE_CHOICES = .*' "$raiz/bot/models.py" \
-    | grep -oE '\("[a-z_]+"' | tr -d '("')
+# desincronice al agregar una marca. El awk (en vez de un grep de una sola
+# linea) tolera que CLIENTE_CHOICES este partido en varias lineas -- como
+# quedo al agregar "intouch" -- ademas del formato de una sola linea.
+mapfile -t validos < <(awk '
+    /^CLIENTE_CHOICES = \[/ { found=1 }
+    found { print }
+    found && /\]/ { exit }
+' "$raiz/bot/models.py" | grep -oE '\("[a-z_]+"' | tr -d '("')
 if [[ ${#validos[@]} -eq 0 ]]; then
     echo "error: no se pudo leer CLIENTE_CHOICES de bot/models.py" >&2
     exit 70

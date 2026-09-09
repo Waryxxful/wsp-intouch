@@ -298,3 +298,14 @@ LOGGING = {
     "handlers": {"console": {"class": "logging.StreamHandler"}},
     "root": {"handlers": ["console"], "level": "INFO"},
 }
+
+# Destino externo del lead, además de la tabla propia (que es la fuente de
+# verdad y siempre se escribe). "none" hasta que exista el POST /api/leads del
+# orquestador -- ver docs/superpowers/specs/2026-09-09-...-design.md §14. Se
+# conmuta por configuración, sin deploy de código.
+LEAD_SINK = os.environ.get("LEAD_SINK", "none")
+LEAD_SINK_URL = os.environ.get("LEAD_SINK_URL", "")
+
+# Cuenta de GranCRM a la que se notifican los leads HOT. Sin esto, bot/notify.py
+# loguea un aviso y no notifica -- mismo comportamiento que wsp_pompeyo.
+GRANCRM_TENANT_SLUG = os.environ.get("GRANCRM_TENANT_SLUG", "")

@@ -528,6 +528,100 @@ def chequear_tools_del_prompt(opciones):
         yield Hallazgo(OK, "ningun prompt nombra una tool sin bindear")
 
 
+# Vocabulario del vertical retirado. Es una lista corta y explicita a
+# proposito: el valor de este chequeo depende de que NO grite en falso, y la
+# unica forma honesta de conseguirlo es enumerar palabras que en un bot B2B de
+# contact center no pueden aparecer por una razon legitima.
+#
+# "auto" NO esta como palabra suelta: vive dentro de "automatizacion" y de
+# "automotriz", que son legitimas acá (el subtipo automotriz es el rubro de la
+# EMPRESA del contacto, no un vehiculo que este bot venda). Todo se busca con
+# \b para no disparar por subcadena.
+VOCABULARIO_DE_OTRO_VERTICAL = (
+    "veh[ií]culos?", "patente", "stock", "garant[ií]a", "repuestos?",
+    "sucursal(?:es)?", "financiamiento", "manten[cs]i[oó]n", "taller(?:es)?",
+    "dyp", "rent a car", "test drive", "cotizar un", "auto nuevo",
+)
+
+# Marcador que reemplaza al prompt escrito por una persona. El texto del
+# fixture (y su version publicada en la BD) SI puede nombrar el sector
+# automotriz con razon -- el prompt de InTouch lo usa como ejemplo ilustrativo
+# y dice explicitamente que no se presente como caso real -- asi que meterlo en
+# este chequeo seria criar lobos. Lo que se revisa es lo que agrega el CODIGO.
+_MARCADOR_DE_PROMPT = "<<<PROMPT DEL ESPECIALISTA>>>"
+
+
+def chequear_vocabulario_del_prompt_armado(opciones):
+    """La otra mitad del chequeo estrella: lo que el modelo lee de verdad.
+
+    `chequear_tools_del_prompt` escanea `effective_prompt()` y busca NOMBRES de
+    tool. Eso deja dos huecos que costaron dos hallazgos Important en la review
+    final de rama (I1, I2), los dos en produccion silenciosa:
+
+      - los bloques determinísticos que `build_system_prompt` le pega al prompt
+        en cada turno no los ve nadie: `_BLOQUE_PROSA` le ofrecia a un bot B2B
+        "buscar en el stock, simular un financiamiento, agendar";
+      - el DOCSTRING de una tool bindeada tampoco: `crear_caso` se presentaba
+        como ticket de postventa con enum garantia|repuesto|dyp|rent_a_car.
+
+    Este chequeo mira las dos cosas y busca CONTENIDO, no nombres. Para no
+    gritar en falso reemplaza el prompt humano por un marcador antes de
+    escanear: `build_system_prompt` recibe el prompt efectivo como parametro,
+    asi que pasarle el marcador deja exactamente los bloques que agrega el
+    codigo. El texto escrito por una persona lo revisa una persona, y el doctor
+    ya lo compara contra el fixture de git en otro chequeo.
+
+    Alcance: los especialistas de codigo REGISTRADOS (bot/flow/agents/AGENTS).
+    Un CustomSpecialist creado desde el panel es dato, no codigo de este repo,
+    y su prompt no se puede recortar con el marcador -- reportarlo aca seria
+    reportar lo que un operador escribio en un textarea.
+
+    Lo que este chequeo NO puede ver, dicho para que nadie lo suponga cubierto:
+    el NOMBRE de un argumento. `responder` declara `sucursal_direccion_ids` en
+    su esquema para los especialistas heredados, y eso solo se arregla
+    recortando el esquema por especialista.
+    """
+    from bot.flow.agents import AGENTS
+    from bot.flow.respuesta import NOMBRE_TOOL_RESPUESTA, responder
+
+    def textos_de_la_tool(tool):
+        yield tool.description or ""
+        for esquema in (tool.args or {}).values():
+            if isinstance(esquema, dict) and esquema.get("description"):
+                yield esquema["description"]
+
+    hubo_falla = False
+    for slug, cls in sorted(AGENTS.items()):
+        agente = cls()
+        fuentes = [("los bloques del prompt armado",
+                    agente.build_system_prompt({}, _MARCADOR_DE_PROMPT))]
+        for tool in [*agente.business_actions(), responder]:
+            etiqueta = ("el canal de salida `responder`"
+                        if tool.name == NOMBRE_TOOL_RESPUESTA
+                        else f"el docstring de `{tool.name}`")
+            fuentes.extend((etiqueta, texto) for texto in textos_de_la_tool(tool))
+
+        encontradas = {}
+        for etiqueta, texto in fuentes:
+            for forma in VOCABULARIO_DE_OTRO_VERTICAL:
+                hallado = re.search(rf"\b{forma}\b", texto, re.IGNORECASE)
+                if hallado:
+                    encontradas.setdefault(etiqueta, set()).add(hallado.group(0).lower())
+        if encontradas:
+            hubo_falla = True
+            detalle = "; ".join(f"{etiqueta}: {', '.join(sorted(palabras))}"
+                                for etiqueta, palabras in sorted(encontradas.items()))
+            yield Hallazgo(
+                FALLA, f"{slug}: el modelo lee vocabulario de otro vertical en cada turno",
+                detalle + " -- un docstring y un bloque de prompt son corpus: el modelo "
+                "imita lo que lee y le promete al contacto capacidades que este bot no "
+                "tiene. Adaptalos al negocio de este bot.",
+            )
+
+    if not hubo_falla:
+        yield Hallazgo(OK, "el prompt armado y los docstrings hablan del negocio de este bot")
+
+
 def chequear_tools_del_prompt_global(opciones):
     from bot.flow.global_prompt import get_effective_global_prompt
     from bot.flow.respuesta import NOMBRE_TOOL_RESPUESTA
@@ -647,7 +741,8 @@ SECCIONES = {
                 chequear_catalogo_openrouter],
     "rag": [chequear_dimension_embeddings, chequear_supabase],
     "prompts": [chequear_prompts_activos, chequear_prompt_contra_fixture,
-                chequear_tools_del_prompt, chequear_tools_del_prompt_global],
+                chequear_tools_del_prompt, chequear_tools_del_prompt_global,
+                chequear_vocabulario_del_prompt_armado],
     "datos": [chequear_catalogo_intouch],
     "whatsapp": [chequear_whatsapp],
 }

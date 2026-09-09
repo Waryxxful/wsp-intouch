@@ -175,3 +175,73 @@ class PromptContraFixtureTest(TestCase):
         self.assertTrue(avisos, hallazgos)
         self.assertIn("seed_intouch", avisos[0].detalle)
         self.assertNotIn("seed_cavem", avisos[0].detalle)
+
+
+class VocabularioDelPromptArmadoTest(TestCase):
+    """El chequeo que cubre lo que el modelo lee DE VERDAD.
+
+    `chequear_tools_del_prompt` escanea `effective_prompt()` y busca nombres de
+    tool; eso dejaba dos huecos por los que pasó corpus de otro vertical hasta la
+    review final de rama: los bloques que `build_system_prompt` pega en cada
+    turno, y el CONTENIDO de los docstrings (no su nombre).
+
+    Los dos tests que importan son el par: que detecte el defecto real y que no
+    grite en falso con el vocabulario legítimo de este bot. Un chequeo que no
+    falla ante lo que persigue no sirve, y uno que grita en falso enseña a
+    ignorar la salida completa del doctor.
+    """
+
+    def _correr(self):
+        from bot.management.commands.doctor import chequear_vocabulario_del_prompt_armado
+
+        return list(chequear_vocabulario_del_prompt_armado({}))
+
+    def test_el_estado_real_del_repo_esta_limpio(self):
+        from bot.management.commands.doctor import FALLA
+
+        self.assertEqual([h for h in self._correr() if h.nivel == FALLA], [])
+
+    def test_detecta_vocabulario_de_otro_vertical_en_un_bloque_del_prompt(self):
+        # El defecto real que encontró la review: `_BLOQUE_PROSA` se pega al
+        # prompt en CADA turno y ofrecía "buscar en el stock, simular un
+        # financiamiento, agendar" a un bot que no tiene nada de eso.
+        import re
+
+        from bot.management.commands.doctor import VOCABULARIO_DE_OTRO_VERTICAL
+
+        defectuoso = ("Si necesitas ejecutar una acción, podés buscar en el stock, "
+                      "simular un financiamiento o agendar una hora en el taller.")
+        encontradas = {re.search(r"\b" + forma + r"\b", defectuoso, re.IGNORECASE).group(0).lower()
+                       for forma in VOCABULARIO_DE_OTRO_VERTICAL
+                       if re.search(r"\b" + forma + r"\b", defectuoso, re.IGNORECASE)}
+        self.assertEqual(encontradas, {"stock", "financiamiento", "taller"})
+
+    def test_no_grita_en_falso_con_el_vocabulario_legitimo(self):
+        # "automatización" y "automotriz" son legítimas: la primera es una
+        # solución del catálogo y la segunda el rubro de la EMPRESA del contacto,
+        # no un vehículo que este bot venda. Si el chequeo las marcara, alguien
+        # lo desactivaría y con él se perdería la cobertura entera.
+        import re
+
+        from bot.management.commands.doctor import VOCABULARIO_DE_OTRO_VERTICAL
+
+        legitimo = ("Automatización y agentes conversacionales con IA. El subtipo "
+                    "automotriz del contacto puede ser Concesionario, Automotora o "
+                    "Financiera Automotriz. Operación de Contact Center híbrido.")
+        for forma in VOCABULARIO_DE_OTRO_VERTICAL:
+            with self.subTest(forma=forma):
+                self.assertIsNone(re.search(r"\b" + forma + r"\b", legitimo, re.IGNORECASE))
+
+    def test_el_patron_de_taller_cubre_el_singular(self):
+        # `talleres?` significaba "tallere" + "s" opcional, así que no matcheaba
+        # "taller" -- la forma más frecuente. Un patrón mal formado hace que el
+        # chequeo pase sin mirar.
+        import re
+
+        from bot.management.commands.doctor import VOCABULARIO_DE_OTRO_VERTICAL
+
+        patrones = " ".join(VOCABULARIO_DE_OTRO_VERTICAL)
+        self.assertIn("taller(?:es)?", patrones)
+        for texto in ("una hora en el taller", "los talleres de la red"):
+            with self.subTest(texto=texto):
+                self.assertTrue(re.search(r"\btaller(?:es)?\b", texto, re.IGNORECASE))

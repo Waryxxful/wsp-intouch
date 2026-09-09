@@ -1326,6 +1326,74 @@ def api_leads(request):
 
 
 @login_required
+def api_leads_intouch(request):
+    """Los leads comerciales B2B de InTouch, para el panel (Task 18 del spec).
+
+    Hoy es la UNICA via por la que el equipo comercial ve una oportunidad: no
+    existe todavia ningun endpoint de leads en el orquestador, y el adaptador
+    de salida de este bot arranca apagado (LEAD_SINK=none) hasta que se
+    construya su destino. Un lead que no aparece aca no lo trabaja nadie.
+
+    No comparte nombre ni ruta con `api_leads` (el lead automotriz heredado,
+    `LeadComercial`): son modelos y verticales distintos, y ese endpoint sigue
+    en uso por su propia suite de tests.
+
+    Incluye `telefono` (del wa_id de la conversacion) y `despachado`, que el
+    modelo no tiene como columna propia: el primero lo agrega la plataforma
+    porque el prompt le prohibe al bot pedirselo al contacto, el segundo se
+    deriva del sello `despachado_en`. Tambien incluye `sink_activo`, para que
+    el panel sepa si mostrar la marca de "sin despachar" -- con el sink
+    apagado, todos los leads quedarian marcados y la señal se pierde.
+
+    Filtro opcional por `lead_score` (HOT/WARM/COLD/NO_CALIFICADO). Orden por
+    actualizacion descendente (`Meta.ordering` del modelo): el lead que
+    acaba de cambiar es el que un ejecutivo necesita ver primero.
+    """
+    from bot.models import LeadInTouch
+
+    filas = LeadInTouch.objects.select_related("conversation").all()
+    score = request.GET.get("lead_score", "").strip()
+    if score:
+        filas = filas.filter(lead_score=score)
+    return JsonResponse({
+        "sink_activo": settings.LEAD_SINK != "none",
+        "leads": [
+            {
+                "id": lead.id,
+                "conversation_id": lead.conversation_id,
+                "telefono": lead.conversation.wa_id,
+                "nombre_completo": lead.nombre_completo,
+                "correo": lead.correo,
+                "empresa": lead.empresa,
+                "industria": lead.industria,
+                "subtipo_automotriz": lead.subtipo_automotriz,
+                "cargo": lead.cargo,
+                "pais_ciudad": lead.pais_ciudad,
+                "situacion_contact_center": lead.situacion_contact_center,
+                "tipo_contact_center": lead.tipo_contact_center,
+                "usa_ia_actualmente": lead.usa_ia_actualmente,
+                "canales_actuales": lead.canales_actuales or [],
+                "volumen_interacciones": lead.volumen_interacciones,
+                "necesidad_principal": lead.necesidad_principal,
+                "soluciones_interes": lead.soluciones_interes or [],
+                "intencion": lead.intencion,
+                "plazo_proyecto": lead.plazo_proyecto,
+                "lead_score": lead.lead_score,
+                "solicita_consultoria": lead.solicita_consultoria,
+                "solicita_contacto_humano": lead.solicita_contacto_humano,
+                "resumen_conversacion": lead.resumen_conversacion,
+                "siguiente_accion_recomendada": lead.siguiente_accion_recomendada,
+                "creado": lead.creado.isoformat(),
+                "actualizado": lead.actualizado.isoformat(),
+                "notificado": bool(lead.notificado_en),
+                "despachado": bool(lead.despachado_en),
+            }
+            for lead in filas
+        ],
+    })
+
+
+@login_required
 def api_campanas(request):
     """Campanas configuradas con su embudo real (docx S18/S20).
 

@@ -46,6 +46,10 @@ urlpatterns = [
     path("api/admin/encuestas/enviar-masivo", views.api_enviar_encuesta_masiva, name="api_enviar_encuesta_masiva"),
     path("api/admin/reservas", views.api_reservas, name="api_reservas"),
     path("api/admin/leads", views.api_leads, name="api_leads"),
+    # Leads B2B de InTouch (LeadInTouch), NO el lead automotriz heredado de
+    # arriba (LeadComercial). Ruta y vista distintas a proposito -- ver el
+    # docstring de api_leads_intouch.
+    path("api/leads", views.api_leads_intouch, name="api_leads_intouch"),
     path("api/admin/campanas", views.api_campanas, name="api_campanas"),
     path("api/admin/campanas/enviar", views.api_campana_enviar, name="api_campana_enviar"),
     path("api/admin/welcome", views.api_welcome, name="api_welcome"),

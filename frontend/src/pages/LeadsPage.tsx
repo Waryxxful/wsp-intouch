@@ -1,190 +1,236 @@
-import { useEffect, useMemo, useState } from 'react';
-import { Card, PageHeader, Badge, DataTable, Modal, Input, Select, StatsCard, LoadingState, Alert } from '@duralux/ui';
+import { useEffect, useState } from 'react';
+import { useNavigate } from 'react-router-dom';
+import { Card, PageHeader, Badge, DataTable, Modal, Select, Icon, LoadingState, Alert } from '@duralux/ui';
 import type { BadgeProps, DataTableColumn } from '@duralux/ui';
 import { apiFetch } from '../api';
 
 interface Lead {
   id: number;
   conversation_id: number | null;
-  nombre: string;
   telefono: string;
-  email: string;
-  comuna: string;
-  vehiculo_interes: string;
-  vehiculo_codigo: string;
-  presupuesto: number | null;
-  pie_disponible: number | null;
-  cuota_objetivo: number | null;
-  plazo_compra: string;
-  tiene_parte_pago: boolean | null;
-  vehiculo_actual: string;
+  nombre_completo: string;
+  correo: string;
+  empresa: string;
+  industria: string;
+  subtipo_automotriz: string;
+  cargo: string;
+  pais_ciudad: string;
+  situacion_contact_center: string;
+  tipo_contact_center: string;
+  usa_ia_actualmente: boolean | null;
+  canales_actuales: string[];
+  volumen_interacciones: string;
+  necesidad_principal: string;
+  soluciones_interes: string[];
   intencion: string;
-  sentimiento: string;
-  urgencia: string;
-  temperatura: string;
-  lead_score: number;
-  proxima_accion: string;
-  resumen: string;
-  ultima_interaccion: string | null;
-  created_at: string;
+  plazo_proyecto: string;
+  lead_score: string;
+  solicita_consultoria: boolean;
+  solicita_contacto_humano: boolean;
+  resumen_conversacion: string;
+  siguiente_accion_recomendada: string;
+  creado: string;
+  actualizado: string;
+  notificado: boolean;
+  despachado: boolean;
+}
+
+interface RespuestaLeads {
+  leads: Lead[];
+  sink_activo: boolean;
 }
 
 type VarianteBadge = NonNullable<BadgeProps['variant']>;
 
-const VARIANTE_TEMPERATURA: Record<string, VarianteBadge> = {
+// "Azul" del brief = primary (#3454d1) y no info (que en esta paleta es
+// teal, no azul) -- ver tokens.d.ts de @duralux/ui.
+const VARIANTE_SCORE: Record<string, VarianteBadge> = {
   HOT: 'danger',
   WARM: 'warning',
-  COLD: 'info',
+  COLD: 'primary',
+  NO_CALIFICADO: 'secondary',
 };
 
-// Un monto vacio se muestra como raya, no como "$0": son cosas distintas
-// (todavia no lo dijo / dijo que no tiene) y confundirlas en una pantalla
-// comercial hace que un ejecutivo llame con el dato equivocado.
-function pesos(valor: number | null): string {
-  if (valor === null || valor === undefined) return '—';
-  return `$${valor.toLocaleString('es-CL')}`;
+const LABEL_SCORE: Record<string, string> = {
+  HOT: 'HOT',
+  WARM: 'WARM',
+  COLD: 'COLD',
+  NO_CALIFICADO: 'No calificado',
+};
+
+const LABEL_TIPO_CC: Record<string, string> = {
+  propio: 'Propio',
+  externalizado: 'Externalizado',
+  mixto: 'Mixto',
+  no_tiene: 'No tiene',
+};
+
+// Un guion es mas honesto que una etiqueta inventada para un campo vacio.
+function guion(valor: string | null | undefined): string {
+  return valor ? valor : '—';
 }
 
-function fecha(iso: string | null): string {
-  if (!iso) return '—';
-  return new Date(iso).toLocaleString('es-CL', {
-    day: '2-digit', month: '2-digit', hour: '2-digit', minute: '2-digit',
-  });
+// Formato relativo simple ("hace 5 min"), sin libreria: al equipo comercial
+// le importa el orden de magnitud (minutos/horas/dias), no el segundo exacto.
+function relativo(iso: string): string {
+  const entoncesMs = new Date(iso).getTime();
+  const diffSeg = Math.round((Date.now() - entoncesMs) / 1000);
+  if (diffSeg < 60) return 'hace instantes';
+  const diffMin = Math.round(diffSeg / 60);
+  if (diffMin < 60) return `hace ${diffMin} min`;
+  const diffHoras = Math.round(diffMin / 60);
+  if (diffHoras < 24) return `hace ${diffHoras} h`;
+  const diffDias = Math.round(diffHoras / 24);
+  if (diffDias < 30) return `hace ${diffDias} d`;
+  return new Date(iso).toLocaleDateString('es-CL', { day: '2-digit', month: '2-digit', year: 'numeric' });
 }
 
 export function LeadsPage() {
+  const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
+  const [sinkActivo, setSinkActivo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
-  const [temperatura, setTemperatura] = useState('');
-  const [busqueda, setBusqueda] = useState('');
+  const [leadScore, setLeadScore] = useState('');
   const [seleccionado, setSeleccionado] = useState<Lead | null>(null);
-  const [modoDemo, setModoDemo] = useState(false);
 
   useEffect(() => {
-    // Debounce + descarte de respuestas viejas. Sin esto sale un request por
-    // tecla, y como las respuestas pueden llegar desordenadas, escribir
-    // "spo" rapido dejaba la tabla mostrando el resultado de "sp".
+    // Descarte de respuestas viejas: si el filtro cambia rapido, las
+    // respuestas pueden llegar desordenadas.
     let vigente = true;
-    const timer = setTimeout(() => {
-      const params = new URLSearchParams();
-      if (temperatura) params.set('temperatura', temperatura);
-      if (busqueda.trim()) params.set('q', busqueda.trim());
-      if (modoDemo) params.set('modo', 'demo');
-      setLoading(true);
-      setError('');
-      apiFetch<Lead[]>(`/intouch/api/admin/leads?${params}`)
-        .then(datos => { if (vigente) setLeads(datos); })
-        .catch(err => { if (vigente) setError(err.message || 'No se pudieron cargar los leads.'); })
-        .finally(() => { if (vigente) setLoading(false); });
-    }, 300);
-    return () => { vigente = false; clearTimeout(timer); };
-  }, [temperatura, busqueda, modoDemo]);
-
-  const totales = useMemo(() => ({
-    hot: leads.filter(l => l.temperatura === 'HOT').length,
-    warm: leads.filter(l => l.temperatura === 'WARM').length,
-    cold: leads.filter(l => l.temperatura === 'COLD').length,
-  }), [leads]);
+    const params = new URLSearchParams();
+    if (leadScore) params.set('lead_score', leadScore);
+    setLoading(true);
+    setError('');
+    apiFetch<RespuestaLeads>(`/intouch/api/leads?${params}`)
+      .then(datos => {
+        if (!vigente) return;
+        setLeads(datos.leads);
+        setSinkActivo(datos.sink_activo);
+      })
+      .catch(err => { if (vigente) setError(err.message || 'No se pudieron cargar los leads.'); })
+      .finally(() => { if (vigente) setLoading(false); });
+    return () => { vigente = false; };
+  }, [leadScore]);
 
   const columnas: DataTableColumn<Lead>[] = [
     {
-      key: 'nombre',
-      label: 'Cliente',
+      key: 'empresa',
+      label: 'Empresa',
       sortable: true,
-      render: (row: Lead) => (
+      render: (row) => row.empresa || row.nombre_completo || row.telefono,
+    },
+    {
+      key: 'nombre_completo',
+      label: 'Contacto',
+      render: (row) => (
         <div>
-          <div className="fw-semibold">{row.nombre || 'Sin nombre'}</div>
-          <small className="text-muted">{row.telefono}</small>
+          <div>{guion(row.nombre_completo)}</div>
+          {row.cargo && <small className="text-muted">{row.cargo}</small>}
         </div>
       ),
     },
     {
-      key: 'vehiculo_interes',
-      label: 'Vehículo',
-      render: (row: Lead) => row.vehiculo_interes || <span className="text-muted">—</span>,
+      key: 'telefono',
+      label: 'Teléfono',
+      render: (row) => (
+        <a href={`https://wa.me/${row.telefono}`} target="_blank" rel="noreferrer">
+          {row.telefono}
+        </a>
+      ),
     },
     {
-      key: 'temperatura',
-      label: 'Temperatura',
+      key: 'correo',
+      label: 'Correo',
+      render: (row) => guion(row.correo),
+    },
+    {
+      key: 'industria',
+      label: 'Industria',
+      render: (row) => (
+        <div>
+          <div>{guion(row.industria)}</div>
+          {row.subtipo_automotriz && <small className="text-muted">{row.subtipo_automotriz}</small>}
+        </div>
+      ),
+    },
+    {
+      key: 'lead_score',
+      label: 'Calificación',
       sortable: true,
-      render: (row: Lead) => (
-        <Badge variant={VARIANTE_TEMPERATURA[row.temperatura] || 'secondary'} soft pill>
-          {row.temperatura || 'sin clasificar'}
+      render: (row) => (
+        <Badge variant={VARIANTE_SCORE[row.lead_score] || 'secondary'} soft pill>
+          {LABEL_SCORE[row.lead_score] || 'Sin calificar'}
         </Badge>
       ),
     },
-    { key: 'lead_score', label: 'Score', sortable: true, render: (row: Lead) => `${row.lead_score}/100` },
-    { key: 'presupuesto', label: 'Presupuesto', render: (row: Lead) => pesos(row.presupuesto) },
-    { key: 'ultima_interaccion', label: 'Última interacción', render: (row: Lead) => fecha(row.ultima_interaccion) },
     {
-      key: 'proxima_accion',
-      label: 'Próxima acción',
-      render: (row: Lead) => row.proxima_accion || <span className="text-muted">—</span>,
+      key: 'necesidad_principal',
+      label: 'Necesidad',
+      render: (row) => {
+        const texto = row.necesidad_principal;
+        if (!texto) return '—';
+        return texto.length > 80 ? `${texto.slice(0, 80)}…` : texto;
+      },
+    },
+    {
+      key: 'situacion_contact_center',
+      label: 'Contact Center',
+      render: (row) => {
+        // situacion_contact_center="no_tiene" fuerza tipo_contact_center a
+        // "no_tiene" en el save() del modelo (bot/models.py), asi que basta
+        // con leer tipo_contact_center una vez que hay situacion informada.
+        if (!row.situacion_contact_center) return '—';
+        return LABEL_TIPO_CC[row.tipo_contact_center] || '—';
+      },
+    },
+    {
+      key: 'actualizado',
+      label: 'Actualizado',
+      sortable: true,
+      render: (row) => (
+        <div className="d-flex align-items-center gap-2">
+          <span>{relativo(row.actualizado)}</span>
+          {row.notificado && (
+            <span title="Ya se notificó como HOT">
+              <Icon name="feather-bell" size="sm" />
+            </span>
+          )}
+          {sinkActivo && !row.despachado && (
+            <span title="Sin despachar al destino externo" className="text-danger">
+              <Icon name="feather-alert-triangle" size="sm" />
+            </span>
+          )}
+        </div>
+      ),
     },
   ];
 
   const acciones = [
-    { label: 'Ver ficha', icon: 'feather-eye', onClick: (row: Lead) => setSeleccionado(row) },
+    { label: 'Ver detalle', icon: 'feather-eye', onClick: (row: Lead) => setSeleccionado(row) },
   ];
 
   return (
     <>
-      {modoDemo && (
-        <Alert variant="warning" icon="feather-alert-triangle" title="Vista de proyección">
-          Estas cifras son de demostración, no mediciones reales de este bot.
-          Desactivá “Proyección demo” para ver los datos efectivos.
-        </Alert>
-      )}
-      <PageHeader title="Leads" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Leads' }]}>
-        <div className="form-check form-switch me-3">
-          <input
-            className="form-check-input"
-            type="checkbox"
-            role="switch"
-            id="toggle-proyeccion"
-            checked={modoDemo}
-            onChange={(e) => setModoDemo(e.target.checked)}
-          />
-          <label className="form-check-label" htmlFor="toggle-proyeccion">
-            Proyección demo
-          </label>
-        </div>
-      </PageHeader>
+      <PageHeader title="Leads" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Leads' }]} />
       <div className="main-content">
         <div className="row g-4">
-          <div className="col-md-4">
-            <StatsCard icon="feather-zap" iconBg="bg-soft-danger" value={String(totales.hot)} label="Leads HOT" />
-          </div>
-          <div className="col-md-4">
-            <StatsCard icon="feather-thermometer" iconBg="bg-soft-warning" value={String(totales.warm)} label="Leads WARM" />
-          </div>
-          <div className="col-md-4">
-            <StatsCard icon="feather-cloud" iconBg="bg-soft-info" value={String(totales.cold)} label="Leads COLD" />
-          </div>
-
           <div className="col-12">
             <Card
               title="Leads capturados"
-              subtitle="Ordenados por lead score: a quién conviene contactar primero"
+              subtitle="Ordenados por última actualización: a quién conviene revisar primero"
               actions={
-                <div className="d-flex gap-2">
-                  <Input
-                    placeholder="Buscar nombre, teléfono o vehículo"
-                    value={busqueda}
-                    onChange={(e: React.ChangeEvent<HTMLInputElement>) => setBusqueda(e.target.value)}
-                  />
-                  <Select
-                    options={[
-                      { value: '', label: 'Todas las temperaturas' },
-                      { value: 'HOT', label: 'Solo HOT' },
-                      { value: 'WARM', label: 'Solo WARM' },
-                      { value: 'COLD', label: 'Solo COLD' },
-                    ]}
-                    value={temperatura}
-                    onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setTemperatura(e.target.value)}
-                  />
-                </div>
+                <Select
+                  options={[
+                    { value: '', label: 'Todas las calificaciones' },
+                    { value: 'HOT', label: 'Solo HOT' },
+                    { value: 'WARM', label: 'Solo WARM' },
+                    { value: 'COLD', label: 'Solo COLD' },
+                    { value: 'NO_CALIFICADO', label: 'Solo no calificados' },
+                  ]}
+                  value={leadScore}
+                  onChange={(e: React.ChangeEvent<HTMLSelectElement>) => setLeadScore(e.target.value)}
+                />
               }
             >
               {error && <Alert variant="danger" icon="feather-alert-circle">{error}</Alert>}
@@ -192,7 +238,7 @@ export function LeadsPage() {
                 <LoadingState />
               ) : leads.length === 0 ? (
                 <p className="text-muted mb-0">
-                  Todavía no hay leads capturados. Aparecen acá apenas un cliente entrega
+                  Todavía no hay leads capturados. Aparecen acá apenas un contacto entrega
                   antecedentes comerciales en una conversación.
                 </p>
               ) : (
@@ -206,47 +252,75 @@ export function LeadsPage() {
       <Modal
         open={seleccionado !== null}
         onClose={() => setSeleccionado(null)}
-        title={seleccionado?.nombre || 'Ficha del lead'}
+        title={seleccionado ? (seleccionado.empresa || seleccionado.nombre_completo || 'Ficha del lead') : 'Ficha del lead'}
         size="lg"
       >
         {seleccionado && (
           <div className="row g-3">
-            <div className="col-12">
-              <Badge variant={VARIANTE_TEMPERATURA[seleccionado.temperatura] || 'secondary'} soft pill>
-                {seleccionado.temperatura} · {seleccionado.lead_score}/100
+            <div className="col-12 d-flex align-items-center gap-2">
+              <Badge variant={VARIANTE_SCORE[seleccionado.lead_score] || 'secondary'} soft pill>
+                {LABEL_SCORE[seleccionado.lead_score] || 'Sin calificar'}
               </Badge>
+              {seleccionado.notificado && <Badge variant="info" soft pill>Notificado</Badge>}
+              {sinkActivo && !seleccionado.despachado && (
+                <Badge variant="danger" soft pill>Sin despachar</Badge>
+              )}
             </div>
-            {seleccionado.resumen && (
+            {seleccionado.necesidad_principal && (
               <div className="col-12">
-                <Card title="Resumen de la conversación">
-                  <p className="mb-0">{seleccionado.resumen}</p>
+                <Card title="Necesidad principal">
+                  <p className="mb-0">{seleccionado.necesidad_principal}</p>
                 </Card>
               </div>
             )}
-            <div className="col-md-6"><strong>Teléfono:</strong> {seleccionado.telefono || '—'}</div>
-            <div className="col-md-6"><strong>Email:</strong> {seleccionado.email || '—'}</div>
-            <div className="col-md-6"><strong>Comuna:</strong> {seleccionado.comuna || '—'}</div>
-            <div className="col-md-6"><strong>Intención:</strong> {seleccionado.intencion || '—'}</div>
-            <div className="col-md-6"><strong>Vehículo de interés:</strong> {seleccionado.vehiculo_interes || '—'}</div>
-            <div className="col-md-6"><strong>Plazo de compra:</strong> {seleccionado.plazo_compra || '—'}</div>
-            <div className="col-md-4"><strong>Presupuesto:</strong> {pesos(seleccionado.presupuesto)}</div>
-            <div className="col-md-4"><strong>Pie disponible:</strong> {pesos(seleccionado.pie_disponible)}</div>
-            <div className="col-md-4"><strong>Cuota objetivo:</strong> {pesos(seleccionado.cuota_objetivo)}</div>
-            <div className="col-md-6">
-              <strong>Parte de pago:</strong>{' '}
-              {seleccionado.tiene_parte_pago === null
-                ? 'no se preguntó'
-                : seleccionado.tiene_parte_pago
-                  ? `sí — ${seleccionado.vehiculo_actual || 'sin detalle'}`
-                  : 'no'}
-            </div>
-            <div className="col-md-3"><strong>Sentimiento:</strong> {seleccionado.sentimiento || '—'}</div>
-            <div className="col-md-3"><strong>Urgencia:</strong> {seleccionado.urgencia || '—'}</div>
-            {seleccionado.proxima_accion && (
+            {seleccionado.resumen_conversacion && (
               <div className="col-12">
-                <Alert variant="info" icon="feather-arrow-right" title="Próxima acción">
-                  {seleccionado.proxima_accion}
+                <Card title="Resumen de la conversación">
+                  <p className="mb-0">{seleccionado.resumen_conversacion}</p>
+                </Card>
+              </div>
+            )}
+            {seleccionado.siguiente_accion_recomendada && (
+              <div className="col-12">
+                <Alert variant="info" icon="feather-arrow-right" title="Siguiente acción recomendada">
+                  {seleccionado.siguiente_accion_recomendada}
                 </Alert>
+              </div>
+            )}
+            <div className="col-md-6"><strong>País / ciudad:</strong> {guion(seleccionado.pais_ciudad)}</div>
+            <div className="col-md-6"><strong>Plazo del proyecto:</strong> {guion(seleccionado.plazo_proyecto)}</div>
+            <div className="col-md-6"><strong>Volumen de interacciones:</strong> {guion(seleccionado.volumen_interacciones)}</div>
+            <div className="col-md-6">
+              <strong>Usa IA actualmente:</strong>{' '}
+              {seleccionado.usa_ia_actualmente === null ? '—' : seleccionado.usa_ia_actualmente ? 'Sí' : 'No'}
+            </div>
+            <div className="col-md-6">
+              <strong>Canales actuales:</strong>{' '}
+              {seleccionado.canales_actuales.length ? seleccionado.canales_actuales.join(', ') : '—'}
+            </div>
+            <div className="col-md-6">
+              <strong>Soluciones de interés:</strong>{' '}
+              {seleccionado.soluciones_interes.length ? seleccionado.soluciones_interes.join(', ') : '—'}
+            </div>
+            <div className="col-md-6">
+              <strong>Solicita consultoría:</strong> {seleccionado.solicita_consultoria ? 'Sí' : 'No'}
+            </div>
+            <div className="col-md-6">
+              <strong>Solicita contacto humano:</strong> {seleccionado.solicita_contacto_humano ? 'Sí' : 'No'}
+            </div>
+            {seleccionado.conversation_id !== null && (
+              <div className="col-12">
+                <button
+                  type="button"
+                  className="btn btn-outline-primary btn-sm"
+                  onClick={() => {
+                    const conversationId = seleccionado.conversation_id;
+                    setSeleccionado(null);
+                    navigate(`../chat/${conversationId}`);
+                  }}
+                >
+                  Ver conversación
+                </button>
               </div>
             )}
           </div>

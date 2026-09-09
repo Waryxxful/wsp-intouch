@@ -208,11 +208,20 @@ class ModeloOperacion(models.Model):
 Ambos con el manager filtrado por `settings.CLIENTE_ACTIVO` (`objects`) y el sin
 filtrar (`todos_los_clientes`), igual que `Servicio` y `Sucursal`.
 
-Contenido semilla desde el prompt §2: cinco soluciones (diseño de operación a
-medida; agentes conversacionales para WhatsApp/voz/chat/email; paneles,
-supervisión, dashboards y Power BI; integraciones con CRM y ERP —con
-`requiere_evaluacion_tecnica=True`—; analítica conversacional y control de
-calidad) y los tres modelos de operación.
+Contenido semilla desde el prompt §2: **seis** soluciones (diseño de operación a
+medida; agentes conversacionales para WhatsApp/voz/chat/email; operación de
+Contact Center; paneles, supervisión, dashboards y Power BI; analítica
+conversacional y control de calidad; integraciones con CRM y ERP —con
+`requiere_evaluacion_tecnica=True`—) y los tres modelos de operación.
+
+> **Corrección al conteo (2026-09-09).** Este párrafo decía "cinco soluciones",
+> tomando la lista de "Capacidades que puedes presentar" del prompt §2 e
+> ignorando que su párrafo anterior afirma que InTouch integra **operación de
+> Contact Center**, y que su §1 dice que el bot ayuda a explorar soluciones de
+> Contact Center. La sexta solución está respaldada por el documento aprobado en
+> dos lugares, así que se conserva; el número era el error. Queda marcado para
+> confirmación del usuario porque es contenido comercial: el bot va a afirmar que
+> InTouch opera Contact Centers.
 
 `requiere_evaluacion_tecnica` no es decorativo: el prompt exige presentar las
 integraciones como sujetas a evaluación técnica, y el especialista lo lee de la

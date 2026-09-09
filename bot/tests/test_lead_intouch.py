@@ -121,6 +121,96 @@ class UnVacioNoPisaTest(TestCase):
         self.assertNotIn("presupuesto_mensual", CAMPOS_ESCRIBIBLES)
 
 
+class BooleanosDeTresEstadosTest(TestCase):
+    """Un booleano de dos estados no puede representar tres.
+
+    El defecto que estos tests anclan estuvo en producción: el extractor manda
+    el objeto completo en cada turno (`strict: true`) y el prompt le pedía
+    `false` en todo lo que no se hubiera dicho. `False` no cae en el centinela
+    de vacío, así que un `solicita_contacto_humano` capturado en el turno N
+    volvía a `False` en el N+1 -- se perdía justamente la señal de que el
+    contacto pidió hablar con una persona.
+
+    `UnVacioNoPisaTest` no lo veía porque sólo prueba strings y listas.
+
+    Agregar `False` al centinela habría borrado el caso legítimo "el contacto
+    dijo que no usa IA", así que los tres campos son enum de tres valores:
+    "si", "no" y "" (no hay evidencia).
+    """
+
+    def setUp(self):
+        self.conv = Conversation.objects.create(wa_id="56922222222")
+
+    def test_un_si_se_escribe_como_true(self):
+        _registrar_lead_impl("56922222222", {"solicita_contacto_humano": "si"})
+        self.assertIs(LeadInTouch.objects.get().solicita_contacto_humano, True)
+
+    def test_un_no_se_escribe_como_false_y_no_es_lo_mismo_que_vacio(self):
+        # El caso legítimo que el arreglo fácil (meter False en el centinela)
+        # habría borrado: que el contacto NO use IA es un antecedente que el
+        # ejecutivo necesita, no un dato faltante.
+        _registrar_lead_impl("56922222222", {"usa_ia_actualmente": "no"})
+        self.assertIs(LeadInTouch.objects.get().usa_ia_actualmente, False)
+
+    def test_el_turno_siguiente_no_borra_un_true(self):
+        # LA REGRESIÓN. Turno N: el contacto pide hablar con una persona.
+        # Turno N+1: el tema no se toca, el extractor manda el campo vacío.
+        _registrar_lead_impl("56922222222", {"solicita_contacto_humano": "si",
+                                            "solicita_consultoria": "si"})
+        _registrar_lead_impl("56922222222", {"solicita_contacto_humano": "",
+                                            "solicita_consultoria": "",
+                                            "empresa": "Acme SpA"})
+        lead = LeadInTouch.objects.get()
+        self.assertIs(lead.solicita_contacto_humano, True)
+        self.assertIs(lead.solicita_consultoria, True)
+        self.assertEqual(lead.empresa, "Acme SpA")
+
+    def test_el_turno_siguiente_tampoco_borra_un_no(self):
+        _registrar_lead_impl("56922222222", {"usa_ia_actualmente": "no"})
+        _registrar_lead_impl("56922222222", {"usa_ia_actualmente": "",
+                                            "empresa": "Acme SpA"})
+        self.assertIs(LeadInTouch.objects.get().usa_ia_actualmente, False)
+
+    def test_una_correccion_del_contacto_si_pisa_un_booleano(self):
+        # Simétrico a `test_una_correccion_del_contacto_si_pisa`: lo que no
+        # puede pisar es el VACÍO, no una respuesta contraria explícita.
+        _registrar_lead_impl("56922222222", {"usa_ia_actualmente": "no"})
+        _registrar_lead_impl("56922222222", {"usa_ia_actualmente": "si"})
+        self.assertIs(LeadInTouch.objects.get().usa_ia_actualmente, True)
+
+    def test_no_se_sabe_deja_usa_ia_en_null(self):
+        # La columna es `null=True` para distinguir "no se sabe" de "no usa".
+        # Con un booleano puro el NULL era inalcanzable y el panel le mostraba
+        # "no usa IA" al ejecutivo sobre empresas a las que nadie preguntó.
+        _registrar_lead_impl("56922222222", {"empresa": "Acme SpA",
+                                            "usa_ia_actualmente": ""})
+        self.assertIsNone(LeadInTouch.objects.get().usa_ia_actualmente)
+
+    def test_un_false_suelto_no_pisa_lo_capturado(self):
+        # El schema ya no permite un booleano, pero si llega uno (una llamada
+        # vieja, o el modelo saliéndose del enum) se lee conservador: un False
+        # es indistinguible del relleno que causó el defecto.
+        _registrar_lead_impl("56922222222", {"solicita_contacto_humano": "si"})
+        _registrar_lead_impl("56922222222", {"solicita_contacto_humano": False})
+        self.assertIs(LeadInTouch.objects.get().solicita_contacto_humano, True)
+
+    def test_un_valor_que_no_es_del_enum_no_afirma_nada(self):
+        _registrar_lead_impl("56922222222", {"empresa": "Acme SpA",
+                                             "usa_ia_actualmente": "quizás"})
+        self.assertIsNone(LeadInTouch.objects.get().usa_ia_actualmente)
+
+    def test_el_schema_del_extractor_pide_los_tres_estados(self):
+        # Las dos puntas tienen que estar de acuerdo: si el schema volviera a
+        # `boolean`, el writer nunca vería un "no" y el defecto vuelve.
+        from bot.flow.extractor_metadatos import LEAD_PROPIEDADES
+
+        for campo in ("usa_ia_actualmente", "solicita_consultoria",
+                      "solicita_contacto_humano"):
+            with self.subTest(campo=campo):
+                self.assertEqual(LEAD_PROPIEDADES[campo],
+                                 {"type": "string", "enum": ["si", "no", ""]})
+
+
 class CorreoTest(TestCase):
     def setUp(self):
         Conversation.objects.create(wa_id="56933333333")

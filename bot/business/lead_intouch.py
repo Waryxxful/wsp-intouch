@@ -65,6 +65,49 @@ _CAMPOS_BOOLEANOS = frozenset({
 })
 _CAMPOS_LISTA = frozenset({"canales_actuales", "soluciones_interes"})
 
+# Las formas que el extractor puede mandar para cada estado de un campo
+# booleano. El schema (`bot/flow/extractor_metadatos.py`) ya restringe el enum a
+# "si"/"no"/"", pero esto se lee tolerante a propósito: el que escribe es un
+# LLM y "sí" con tilde o "true" no pueden costar un dato.
+_SI = frozenset({"si", "sí", "true", "verdadero", "1"})
+_NO = frozenset({"no", "false", "falso", "0"})
+
+
+def _tri_estado(valor):
+    """Los tres estados de un campo booleano del lead: sí, no y "no se sabe".
+
+    UN BOOLEANO DE DOS ESTADOS NO PUEDE REPRESENTAR TRES, y eso costó datos
+    reales. El extractor manda el objeto completo en cada turno porque
+    `strict: true` se lo exige, y el prompt le pedía `false` en todo lo que no
+    se hubiera dicho. `False` no cae en el centinela de vacío de más abajo (no
+    es `None`, ni `""`, ni `[]`, ni `{}`), así que se escribía: un
+    `solicita_contacto_humano` capturado en el turno N volvía a `False` en el
+    N+1, y se perdía justamente la señal de que el contacto pidió hablar con
+    una persona.
+
+    Agregar `False` al centinela NO era el arreglo -- habría borrado el caso
+    legítimo "el contacto dijo que no usa IA", que es un antecedente que el
+    ejecutivo necesita. Los tres campos pasaron a enum de tres valores en el
+    schema del extractor ("si" / "no" / "") y acá se traducen.
+
+    Devuelve None cuando no hay evidencia, y el llamador NO escribe. Por eso
+    `usa_ia_actualmente` puede quedar en NULL, que es para lo que la columna es
+    `null=True`: "no se sabe" y "no usa" no son lo mismo, y el panel le mostraba
+    "no usa IA" al ejecutivo sobre empresas a las que nadie les preguntó.
+    """
+    if isinstance(valor, bool):
+        # El schema ya no lo permite. Un booleano suelto -- una llamada vieja, o
+        # el modelo saliéndose del enum -- se lee conservador: un True afirma
+        # algo, pero un False es indistinguible del relleno que causó el
+        # defecto, así que no pisa lo capturado.
+        return True if valor else None
+    texto = str(valor).strip().lower()
+    if texto in _SI:
+        return True
+    if texto in _NO:
+        return False
+    return None
+
 
 def _recortar(instancia, campo: str, valor):
     """Recorta un texto al max_length real de su columna.
@@ -127,7 +170,10 @@ def _registrar_lead_impl(wa_id: str, datos: dict, senales=None) -> dict:
         if valor in (None, "", [], {}):
             continue
         if campo in _CAMPOS_BOOLEANOS:
-            setattr(lead, campo, bool(valor))
+            estado = _tri_estado(valor)
+            if estado is None:
+                continue
+            setattr(lead, campo, estado)
         elif campo in _CAMPOS_LISTA:
             setattr(lead, campo, list(valor) if isinstance(valor, (list, tuple)) else [])
         else:

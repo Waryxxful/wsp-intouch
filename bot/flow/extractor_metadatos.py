@@ -111,15 +111,27 @@ LEAD_PROPIEDADES = {
     "situacion_contact_center": {"type": "string", "enum": ["tiene", "no_tiene", ""]},
     "tipo_contact_center": {"type": "string", "enum": [
         "propio", "externalizado", "mixto", "no_tiene", ""]},
-    "usa_ia_actualmente": {"type": "boolean"},
+    # TRES ESTADOS, NO DOS: `sí`, `no` y "no tengo evidencia" (cadena vacía).
+    # Eran `boolean` y eso costó datos reales: `strict: true` obliga al modelo a
+    # mandar la clave en todos los turnos, el prompt le decía que mandara
+    # `false` en lo que no se habló, y `False` no lo atrapa el centinela de
+    # vacío de bot/business/lead_intouch.py -- así que un
+    # `solicita_contacto_humano` capturado en el turno N volvía a `False` en el
+    # N+1. Se perdía justamente la señal de que el contacto pidió hablar con una
+    # persona. Y `usa_ia_actualmente` es `null=True` en la BD para distinguir
+    # "no se sabe" de "no usa": con un booleano puro el NULL era inalcanzable y
+    # el panel le mostraba "no usa IA" al ejecutivo sobre una empresa a la que
+    # nadie le preguntó.
+    "usa_ia_actualmente": {"type": "string", "enum": ["si", "no", ""]},
     "canales_actuales": {"type": "array", "items": {"type": "string"}},
     "volumen_interacciones": {"type": "string"},
     "necesidad_principal": {"type": "string"},
     "soluciones_interes": {"type": "array", "items": {"type": "string"}},
     "intencion": {"type": "string"},
     "plazo_proyecto": {"type": "string"},
-    "solicita_consultoria": {"type": "boolean"},
-    "solicita_contacto_humano": {"type": "boolean"},
+    # Tres estados por lo mismo que `usa_ia_actualmente`, arriba.
+    "solicita_consultoria": {"type": "string", "enum": ["si", "no", ""]},
+    "solicita_contacto_humano": {"type": "string", "enum": ["si", "no", ""]},
     "resumen_conversacion": {"type": "string"},
     "siguiente_accion_recomendada": {"type": "string"},
     # Las señales que alimentan el score. Son observaciones, no un veredicto.
@@ -139,6 +151,16 @@ LEAD_PROPIEDADES_WRAPPER = {
     "required": list(LEAD_PROPIEDADES),
 }
 
+# `lead_class` NO está en este schema, y es a propósito: HOT/WARM/COLD es
+# exactamente el veredicto que `calcular_score_intouch` produce en código desde
+# las `senales`. Pedírselo además al modelo son dos escritores del mismo dato, y
+# el del modelo no es reproducible -- el mismo lead salía HOT o WARM según el
+# turno. `bot/flow/respuesta.py::campos_de` ya lo descartaba al escribir para
+# "comercial", pero se le seguía pidiendo al LLM en cada turno del bot.
+#
+# El lector de `lead_class` de `_metadatos_desde` sigue en pie: el especialista
+# heredado "ventas" lo declara en CAMPOS_EXTRA_POR_AGENTE y su cobertura prueba
+# defensas reales de este stack.
 SCHEMA_METADATOS = {
     "name": "metadatos_del_turno",
     "strict": True,
@@ -149,7 +171,6 @@ SCHEMA_METADATOS = {
             "intent": {"type": "string", "enum": [
                 "informarse", "diagnosticar", "cotizar", "agendar_reunion",
                 "soporte", "otro_asunto", "cortesia", "handoff", ""]},
-            "lead_class": {"type": "string", "enum": ["HOT", "WARM", "COLD", ""]},
             "stage": {"type": "string", "enum": [
                 "nuevo", "descubrimiento", "diagnostico", "recomendacion",
                 "calificacion", "siguiente_paso", "handoff", "cerrado", ""]},
@@ -163,7 +184,7 @@ SCHEMA_METADATOS = {
         },
         # Todos requeridos porque `strict: true` lo exige; el valor vacío es la
         # forma de decir "no tengo evidencia de esto".
-        "required": ["intent", "lead_class", "stage", "handoff", "handoff_reason",
+        "required": ["intent", "stage", "handoff", "handoff_reason",
                      "requiere_revision", "motivo_revision", "next_state",
                      "extracted_data", "lead"],
     },
@@ -214,8 +235,8 @@ Reglas que no se negocian:
   no hay ninguno, un objeto vacío.
 - "lead" son los antecedentes comerciales, para que un ejecutivo retome el
   caso. Llena solo los campos que el contacto HAYA DICHO en este turno, o que
-  la respuesta del asesor confirme; el resto va en cadena vacía, lista vacía o
-  false. No deduzcas ni estimes: un campo vacío se puede preguntar después, uno
+  la respuesta del asesor confirme; el resto va en cadena vacía o lista vacía.
+  No deduzcas ni estimes: un campo vacío se puede preguntar después, uno
   inventado se le entrega al ejecutivo como si fuera cierto.
   - No deduzcas la empresa, la industria, el cargo ni la ubicación a partir del
     correo, del número de teléfono o del nombre.
@@ -229,9 +250,18 @@ Reglas que no se negocian:
     externalizada, el tipo es "mixto".
   - "soluciones_interes" son las soluciones que le interesan al CONTACTO. No
     confundas con las que el asesor le ofreció.
-  - "solicita_consultoria" y "solicita_contacto_humano" van en true SOLO si el
-    contacto lo pidió o lo aceptó explícitamente. Que haya entregado sus datos
-    no significa que pidió una reunión.
+  - "usa_ia_actualmente", "solicita_consultoria" y "solicita_contacto_humano"
+    tienen TRES valores y no dos, porque "no se sabe" y "no" son cosas
+    distintas: "si", "no" y la cadena vacía. La cadena vacía es la única
+    respuesta correcta cuando el tema no se habló en toda la conversación -- no
+    pongas "no" para rellenar. Un "no" afirma que el contacto lo negó, y así se
+    lo entregamos al ejecutivo.
+    - "usa_ia_actualmente": "si" si dijo que ya usa alguna herramienta de IA,
+      "no" si dijo que no usa ninguna, vacío si nadie lo mencionó.
+    - "solicita_consultoria" y "solicita_contacto_humano": "si" SOLO si el
+      contacto lo pidió o lo aceptó explícitamente; que haya entregado sus
+      datos no significa que pidió una reunión. "no" sólo si lo rechazó.
+      Vacío si no se habló.
   - "subtipo_automotriz": solo si la industria es automotriz y el contacto
     confirmó cuál. "otro" significa que dijo una categoría distinta de las
     seis; si no lo dijo, va vacío.
@@ -257,8 +287,9 @@ Reglas que no se negocian:
     - "interes_exploratorio": hay interés comercial pero sin necesidad concreta
       ni intención de avanzar ahora.
     No estimes presupuesto, autoridad de compra ni urgencia que no haya dicho.
-- Cualquier campo del que no tengas evidencia va en cadena vacía, lista vacía o
-  false.
+- Cualquier campo del que no tengas evidencia va en cadena vacía o lista vacía.
+  Los booleanos de "senales" son la excepción: ahí false significa "no observé
+  esto", que es lo mismo que no tener evidencia.
 
 Conversación previa (contexto para "resumen_conversacion",
 "siguiente_accion_recomendada" y "senales"):

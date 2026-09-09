@@ -25,10 +25,18 @@ def _llm_que_devuelve(contenido):
 class SchemaTest(SimpleTestCase):
     def test_el_schema_pide_los_campos_del_contrato(self):
         props = SCHEMA_METADATOS["schema"]["properties"]
-        for campo in ("intent", "lead_class", "stage", "handoff", "handoff_reason",
+        for campo in ("intent", "stage", "handoff", "handoff_reason",
                       "requiere_revision", "motivo_revision", "extracted_data",
                       "next_state"):
             self.assertIn(campo, props)
+
+    def test_el_schema_no_le_pide_lead_class_al_modelo(self):
+        # HOT/WARM/COLD es el veredicto que `calcular_score_intouch` produce en
+        # código desde las `senales`. Pedírselo además al modelo son dos
+        # escritores del mismo dato, y el del modelo no es reproducible: el
+        # mismo lead salía HOT o WARM según el turno.
+        self.assertNotIn("lead_class", SCHEMA_METADATOS["schema"]["properties"])
+        self.assertNotIn("lead_class", SCHEMA_METADATOS["schema"]["required"])
 
     def test_el_schema_no_pide_el_mensaje(self):
         # El mensaje ya lo escribio el modelo grande: el extractor NUNCA lo

@@ -142,7 +142,7 @@ class ReservasProyeccionTest(TestCase):
         }
         filas = self.client.get("/demo/api/admin/reservas?modo=demo").json()
         self.assertTrue({f["servicio"] for f in filas} <= servicios_reales)
-        self.assertEqual({f["sucursal"] for f in filas}, {"Cavem La Reina"})
+        self.assertEqual({f["sucursal"] for f in filas}, {"Taller La Reina"})
 
     def test_muestra_los_dos_estados(self):
         filas = self.client.get("/demo/api/admin/reservas?modo=demo").json()
@@ -218,7 +218,7 @@ class CampanasProyeccionTest(TestCase):
         filas = self.client.get("/demo/api/admin/campanas?modo=demo").json()
         self.assertEqual(
             {f["campaign_type"] for f in filas},
-            {"cyber_auto_demo", "renueva_tu_auto", "servicio_tecnico_mantencion"},
+            {"webinar_agentes_ia", "diagnostico_gratuito", "soporte_control_calidad"},
         )
         self.assertTrue(all(f["id"] < 0 for f in filas))
 
@@ -647,3 +647,54 @@ class EscrituraConIdProyectadoTest(TestCase):
         self.conv_real.refresh_from_db()
         self.assertFalse(self.conv_real.archived)
         self.assertEqual(self.conv_real.get_flow(), {})
+
+
+class DemoAutomotrizGateadaPorClienteTest(TestCase):
+    """Fija el comportamiento del gate de _gatear_demo_automotriz: con un
+    cliente que no hereda esta demo (ej. intouch), cada punto de entrada
+    devuelve vacio sin ejecutar la funcion real, y ningun id se reporta como
+    proyectado. Sin este test el gate se cae en el primer refactor (ej. si
+    alguien reordena el decorador respecto al resto) y nadie se entera."""
+
+    @override_settings(CLIENTE_ACTIVO="intouch")
+    def test_es_id_proyectado_da_false_para_cualquier_negativo(self):
+        self.assertFalse(proyeccion.es_id_proyectado(-1))
+        self.assertFalse(proyeccion.es_id_proyectado(-42))
+
+    @override_settings(CLIENTE_ACTIVO="intouch")
+    def test_leads_reservas_y_campanas_devuelven_lista_vacia(self):
+        self.assertEqual(proyeccion.leads(), [])
+        self.assertEqual(proyeccion.reservas(), [])
+        self.assertEqual(proyeccion.campanas(), [])
+
+    @override_settings(CLIENTE_ACTIVO="intouch")
+    def test_dashboard_devuelve_vacio_y_no_es_proyeccion(self):
+        data = proyeccion.dashboard()
+        self.assertIs(data["es_proyeccion"], False)
+        self.assertEqual(data["conv_count"], 0)
+        self.assertEqual(data["chart"], [])
+        self.assertEqual(data["funnel"], [])
+
+    @override_settings(CLIENTE_ACTIVO="intouch")
+    def test_conversaciones_y_mensajes_devuelven_vacio(self):
+        d = proyeccion.conversaciones()
+        self.assertEqual(d["items"], [])
+        self.assertEqual(d["count"], 0)
+        self.assertIs(d["es_proyeccion"], False)
+
+        m = proyeccion.mensajes(-1)
+        self.assertEqual(m["items"], [])
+        self.assertIs(m["has_more"], False)
+        self.assertIs(m["es_proyeccion"], False)
+
+    def test_los_clientes_heredados_siguen_viendo_el_dataset_completo(self):
+        # Guarda contra que alguien reduzca el set heredado por error: la
+        # suite entera corre con CLIENTE_ACTIVO=renault y depende de que
+        # renault, astara y cavem sigan viendo el dataset completo.
+        for cliente in ("renault", "astara", "cavem"):
+            with self.subTest(cliente=cliente), override_settings(CLIENTE_ACTIVO=cliente):
+                self.assertEqual(len(proyeccion.leads()), 20)
+                self.assertEqual(len(proyeccion.reservas()), 9)
+                self.assertEqual(len(proyeccion.campanas()), 3)
+                self.assertIs(proyeccion.dashboard()["es_proyeccion"], True)
+                self.assertTrue(proyeccion.es_id_proyectado(-1))

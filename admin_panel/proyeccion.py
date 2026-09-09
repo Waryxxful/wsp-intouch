@@ -12,12 +12,70 @@ consulta no encuentra nada en vez de tocar la fila real de un cliente.
 Cubre todo el panel: `dashboard()`, `leads()`, `reservas()`, `campanas()`,
 `conversaciones()` y `mensajes()`.
 """
+import functools
 from datetime import date as _date
 from datetime import datetime as _datetime
 from datetime import time as _time
 from datetime import timedelta
 
 from django.conf import settings
+
+# Clientes que heredan este dataset. Los tres son marcas automotrices previas
+# a InTouch (ver bot/models.py::CLIENTE_CHOICES); un bot nuevo que no este en
+# este set no lo hereda -- ver el docstring de _gatear_demo_automotriz.
+_CLIENTES_CON_DEMO_AUTOMOTRIZ = {"renault", "astara", "cavem"}
+
+
+def _gatear_demo_automotriz(valor_vacio):
+    """Decorador: si `settings.CLIENTE_ACTIVO` no esta en
+    `_CLIENTES_CON_DEMO_AUTOMOTRIZ`, devuelve `valor_vacio()` sin ejecutar la
+    funcion real.
+
+    Este dataset es la demo de un bot automotriz. Un bot nuevo no hereda la
+    demo de otro cliente: mostrarle conversaciones falsas de compradores de
+    auto a un contacto de InTouch es peor que mostrar el panel vacio, que
+    ademas es la verdad de un bot recien levantado. Si InTouch quiere su
+    propio dataset de demo, es trabajo propio con su narrativa B2B -- ver
+    hilo.md.
+    """
+    def decorador(fn):
+        @functools.wraps(fn)
+        def envoltura(*args, **kwargs):
+            if settings.CLIENTE_ACTIVO not in _CLIENTES_CON_DEMO_AUTOMOTRIZ:
+                return valor_vacio()
+            return fn(*args, **kwargs)
+        return envoltura
+    return decorador
+
+
+def _dashboard_vacio() -> dict:
+    """El `dashboard()` de un cliente sin esta demo: mismas claves, en cero."""
+    hoy = _date.today()
+    return {
+        "es_proyeccion": False,
+        "conv_count": 0, "msg_count": 0, "msg_today": 0,
+        "msg_by_role": {"user": 0, "assistant": 0, "human": 0},
+        "active_24h": 0, "active_flows": 0,
+        "chart": [],
+        "bot_on": True, "connected": True, "phone_id": "",
+        "model": "",
+        "reservas_total": 0, "reservas_today": 0, "reservas_week": 0,
+        "human_mode_count": 0,
+        "agent_distribution": [],
+        "range": {"start": hoy.isoformat(), "end": hoy.isoformat()},
+        "funnel": [],
+        "kpis": {
+            "tiempo_respuesta_promedio_seg": None, "tiempo_respuesta_p50_seg": None,
+            "pct_respondidas": None, "pct_agendada": None,
+            "templates_enviados": 0, "fuera_de_horario": 0,
+        },
+        "funnel_evolution": [], "alerts": [],
+        "extra_proyeccion": {
+            "solicitudes_financiamiento": 0, "tasaciones_solicitadas": 0,
+            "derivaciones_comerciales": 0,
+        },
+    }
+
 
 CIFRAS = {
     "conversaciones": 1284,
@@ -33,6 +91,7 @@ CIFRAS = {
 }
 
 
+@_gatear_demo_automotriz(lambda: False)
 def es_id_proyectado(pk) -> bool:
     """True si `pk` es un id de fila proyectada (entero negativo).
 
@@ -137,6 +196,7 @@ def _funnel():
     return funnel
 
 
+@_gatear_demo_automotriz(lambda: [])
 def leads() -> list[dict]:
     """20 leads de proyeccion (docx S18).
 
@@ -462,6 +522,7 @@ def leads() -> list[dict]:
     ]
 
 
+@_gatear_demo_automotriz(lambda: [])
 def reservas() -> list[dict]:
     """9 horas de taller de proyeccion (docx S11).
 
@@ -572,6 +633,7 @@ def reservas() -> list[dict]:
     ]
 
 
+@_gatear_demo_automotriz(lambda: [])
 def campanas() -> list[dict]:
     """Las 3 campanas del seed con metricas de proyeccion (docx S20).
 
@@ -637,6 +699,7 @@ def campanas() -> list[dict]:
     ]
 
 
+@_gatear_demo_automotriz(_dashboard_vacio)
 def dashboard() -> dict:
     """Vista de proyeccion del dashboard (docx S19). NO toca la base: son
     cifras de demostracion, y mezclarlas con filas reales obligaria despues a
@@ -699,6 +762,7 @@ def dashboard() -> dict:
 _MINUTOS_ENTRE_MENSAJES = 1
 
 
+@_gatear_demo_automotriz(lambda: {"items": [], "count": 0, "es_proyeccion": False})
 def conversaciones() -> dict:
     """12 conversaciones de proyeccion (docx S17/S21).
 
@@ -922,6 +986,7 @@ _TRANSCRIPCIONES = {
 }
 
 
+@_gatear_demo_automotriz(lambda: {"items": [], "has_more": False, "es_proyeccion": False})
 def mensajes(conv_id: int) -> dict:
     """Transcripcion de proyeccion de una conversacion.
 

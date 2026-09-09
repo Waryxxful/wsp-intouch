@@ -481,17 +481,7 @@ class GraphSmokeTest(TestCase):
 
         self.assertIsNone(result["handoff_reason"])
 
-    @patch("bot.flow.graph._get_llm")
-    @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
-    def test_supervisor_con_output_invalido_cae_a_faq_no_al_primer_agente(self, mock_llm, mock_get_llm):
-        # Regresion: el fallback usaba next(iter(AGENTS)), que hoy resuelve a
-        # "agendamiento" (primer key registrado) — un output invalido del LLM
-        # empujaria a un usuario con una pregunta suelta a un flujo de
-        # reserva no solicitado en vez del catch-all seguro "faq". "faq" esta
-        # en el camino de tools (Task 7 del plan de RAG agentico) -- el
-        # supervisor sigue usando _ainvoke_with_retry (un solo valor, ya no
-        # 2: el segundo era para el especialista via el camino viejo).
-        mock_llm.return_value = "esto no es json valido"
+    def _llm_de_especialista(self, mock_get_llm):
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "no tengo esa info todavia", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -500,11 +490,69 @@ class GraphSmokeTest(TestCase):
         llm_base = MagicMock()
         llm_base.bind_tools.return_value = llm_con_tools
         mock_get_llm.return_value = llm_base
+        return llm_con_tools
 
-        graph = get_flow_graph()
-        result = self._run(graph, self._initial_state())
+    @patch("bot.flow.graph._get_llm")
+    @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
+    def test_supervisor_con_output_invalido_prefiere_el_catch_all_al_primer_agente(self, mock_llm, mock_get_llm):
+        # LA REGRESION ORIGINAL: el fallback usaba next(iter(AGENTS)), asi que
+        # un output invalido del LLM empujaba a un contacto con una pregunta
+        # suelta al PRIMER especialista registrado -- si ese era uno de negocio
+        # (p.ej. "agendamiento"), a un flujo de reserva que nadie pidio. El
+        # codigo prefiere el catch-all explicito: `"faq" if "faq" in registry`.
+        #
+        # InTouch: con el registro real (un solo especialista) las dos ramas de
+        # esa linea devuelven lo mismo, asi que el test dejaria de distinguir
+        # nada. Se inyecta un registro de DOS agentes con el de negocio PRIMERO
+        # para que la preferencia sea observable otra vez -- es la unica forma
+        # de que este test siga probando lo que dice probar. La configuracion
+        # real de este bot la cubre el test de abajo.
+        from bot.flow.agents.faq import FaqAgent
+
+        mock_llm.return_value = "esto no es json valido"
+        self._llm_de_especialista(mock_get_llm)
+        registro = {"agendamiento": AgendamientoAgent(), "faq": FaqAgent()}
+
+        with patch("bot.flow.graph.build_agent_registry", return_value=registro):
+            graph = get_flow_graph()
+            result = self._run(graph, self._initial_state())
 
         self.assertEqual(result["active_agent"], "faq")
+        self.assertNotEqual(result["active_agent"], next(iter(registro)))
+
+    @patch("bot.flow.graph._get_llm")
+    @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
+    def test_supervisor_con_output_invalido_no_cae_en_un_especialista_del_panel(self, mock_llm, mock_get_llm):
+        # La misma defensa bajo la configuracion REAL de este bot, donde no hay
+        # catch-all "faq" y el fallback es `next(iter(registry))`.
+        #
+        # Lo que hay que garantizar es que ese primero sea el especialista de
+        # CODIGO y nunca uno creado desde el panel: un "reclamos" o un "cobranza"
+        # que alguien agregue no puede volverse el destino accidental de todo
+        # output invalido del LLM. `build_agent_registry` mete AGENTS antes de
+        # los CustomSpecialist justamente por eso, y esto lo ancla.
+        from bot.flow.agents import ComercialAgent
+
+        class EspecialistaDelPanel:
+            # `descripcion` la consume el prompt del supervisor
+            # (_rutear_con_el_llm), asi que un stand-in de CustomPromptAgent la
+            # necesita.
+            name = "reclamos"
+            descripcion = "Reclamos, un especialista creado desde el panel"
+
+            def business_actions(self):
+                return []
+
+        mock_llm.return_value = "esto no es json valido"
+        self._llm_de_especialista(mock_get_llm)
+        registro = {"comercial": ComercialAgent(), "reclamos": EspecialistaDelPanel()}
+
+        with patch("bot.flow.graph.build_agent_registry", return_value=registro):
+            graph = get_flow_graph()
+            result = self._run(graph, self._initial_state())
+
+        self.assertEqual(result["active_agent"], "comercial")
+        self.assertNotEqual(result["active_agent"], "reclamos")
 
     def _run(self, graph, state):
         import asyncio
@@ -780,9 +828,14 @@ class SpecialistNodeGlobalPromptTest(TransactionTestCase):
 
     @patch("bot.flow.graph._get_llm")
     def test_prompt_global_va_antes_del_prompt_del_especialista(self, mock_get_llm):
+        # InTouch: el especialista es "comercial" -- "faq" quedo en
+        # AGENTES_NO_REGISTRADOS, asi que specialist_node caia al fallback y su
+        # prompt no se cargaba nunca. Lo que este test protege es el ORDEN (el
+        # global va antes y gana en conflicto), y eso no depende de que
+        # especialista sea.
         from bot.models import save_prompt_version
         save_prompt_version("global", "MARCADOR_GLOBAL_TEST")
-        save_prompt_version("faq", "MARCADOR_FAQ_TEST")
+        save_prompt_version("comercial", "MARCADOR_ESPECIALISTA_TEST")
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "...", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -792,14 +845,14 @@ class SpecialistNodeGlobalPromptTest(TransactionTestCase):
         llm_base.bind_tools.return_value = llm_con_tools
         mock_get_llm.return_value = llm_base
 
-        state = self._initial_state(active_agent="faq", text="hola")
+        state = self._initial_state(active_agent="comercial", text="hola")
         asyncio.run(specialist_node(state))
 
         mensajes_enviados = llm_con_tools.ainvoke.call_args[0][0]
         system_prompt = mensajes_enviados[0].content
         self.assertLess(
             system_prompt.index("MARCADOR_GLOBAL_TEST"),
-            system_prompt.index("MARCADOR_FAQ_TEST"),
+            system_prompt.index("MARCADOR_ESPECIALISTA_TEST"),
         )
 
 
@@ -846,12 +899,17 @@ class GraphStaticAgentPromptOverrideTest(TransactionTestCase):
 
     @patch("bot.flow.graph._get_llm")
     def test_override_de_prompt_de_agente_estatico_llega_al_llm(self, mock_get_llm):
-        # agendamiento (Task 9) ya esta en el camino de tools -- el override
-        # de prompt llega en el SystemMessage, no en un prompt de texto
-        # plano via _ainvoke_with_retry.
+        # El override de prompt llega en el SystemMessage, no en un prompt de
+        # texto plano via _ainvoke_with_retry.
+        #
+        # InTouch: el especialista ESTATICO de este bot es "comercial"
+        # -- "agendamiento" quedo en AGENTES_NO_REGISTRADOS y el registro real
+        # no lo resuelve. La defensa (un PromptVersion activo de un
+        # especialista de CODIGO llega al LLM) es la misma; lo que cambia es
+        # cual es el especialista de codigo.
         from bot.models import save_prompt_version
-        save_prompt_version("agendamiento", "MARCADOR_OVERRIDE_TEST: atende agendamientos solo por telefono.")
-        PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(default_agent="agendamiento")
+        save_prompt_version("comercial", "MARCADOR_OVERRIDE_TEST: atiende solo consultas por escrito.")
+        PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(default_agent="comercial")
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "listo", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -864,7 +922,7 @@ class GraphStaticAgentPromptOverrideTest(TransactionTestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
         llm_con_tools.ainvoke.assert_called_once()  # ruteo deterministico, sin LLM del supervisor
         mensajes_enviados = llm_con_tools.ainvoke.call_args[0][0]
         system_prompt = mensajes_enviados[0].content
@@ -1365,7 +1423,16 @@ class BusinessActionNodeAgendarHoraTest(TransactionTestCase):
             "fecha": "2026-09-01", "hora": "10:00", "contacto": "otro-numero", "nombre": "Ana",
         })
 
-        result = asyncio.run(business_action_node(state))
+        # InTouch: "agendamiento" ya no esta en AGENTS, asi que sin esto
+        # business_action_node no resuelve la tool y el ToolMessage no es JSON.
+        # Se reinyecta el agente real (mismo patron que el resto del archivo)
+        # para seguir ejecutando `agendar_hora` de verdad: la defensa es que el
+        # identificador de la PERSONA salga del estado y no de lo que el LLM
+        # puso en tool_calls[0].args, y eso solo se prueba con la tool real
+        # escribiendo la Reserva.
+        with patch("bot.flow.graph.build_agent_registry",
+                   return_value={"agendamiento": AgendamientoAgent()}):
+            result = asyncio.run(business_action_node(state))
 
         contenido = json.loads(result["tool_messages"][-1].content)
         self.assertTrue(contenido["ok"])
@@ -1520,14 +1587,33 @@ class BusinessActionNodeMultiplesToolCallsTest(TransactionTestCase):
     def tearDown(self):
         PRE_ROUTING_RULES.clear()
 
+    def _crear_vehiculo(self, **kwargs):
+        from bot.models import VehiculoUsado
+
+        datos = {
+            "codigo": "US001", "marca": "Hyundai", "modelo": "Tucson",
+            "version": "2.0 AT Value", "anio": 2023, "km": 31800,
+            "precio_lista": 20490000, "precio_oferta": 19990000,
+            "tipo_vehiculo": "SUV", "combustible": "Gasolina",
+            "transmision": "Automática 6AT", "es_automatico": True,
+            "traccion": "4x2", "disponibilidad": "Disponible",
+        }
+        datos.update(kwargs)
+        return VehiculoUsado.objects.create(**datos)
+
     def test_ejecuta_las_dos_tool_calls_de_un_mismo_turno(self):
         from bot.flow.agents.custom import CustomPromptAgent
         from bot.flow.graph import business_action_node
         from bot.models import CustomSpecialist, save_prompt_version
-        from bot.tests.test_usados_cavem import crear_vehiculo
 
-        crear_vehiculo(codigo="US001", marca="Hyundai", modelo="Tucson", precio_oferta=19_990_000)
-        crear_vehiculo(codigo="US004", marca="Kia", modelo="Sportage", precio_oferta=18_990_000)
+        # La fabrica va inline y NO se importa de test_usados_cavem: ese modulo
+        # importa bot.management.commands.importar_stock_cavem, que no existe en
+        # este repo (el importador de la planilla de Cavem no se copio), asi que
+        # el import tumbaba este test entero. Lo que protege -- que el grafo
+        # ejecute las DOS tool_calls de un mismo turno -- no tiene nada que ver
+        # con el importador.
+        self._crear_vehiculo(codigo="US001", marca="Hyundai", modelo="Tucson", precio_oferta=19_990_000)
+        self._crear_vehiculo(codigo="US004", marca="Kia", modelo="Sportage", precio_oferta=18_990_000)
         row = CustomSpecialist.objects.create(slug="ventas", label="Ventas", descripcion="Ventas de autos")
         save_prompt_version("custom:ventas", "prompt de ventas de prueba")
         agent = CustomPromptAgent(row)
@@ -1962,12 +2048,17 @@ class SupervisorIntencionCompraTest(TransactionTestCase):
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
     def test_intencion_compra_real_true_sin_ventas_en_registro_cae_a_chosen_normal(self, mock_llm, mock_get_llm):
-        # No se crea CustomSpecialist "ventas" -- el registro solo tiene los
-        # agentes estaticos (agendamiento, confirmacion, faq). "faq" esta en
-        # el camino de tools (Task 7 del plan de RAG agentico) -- necesita el
-        # mock de _get_llm ademas del de _ainvoke_with_retry (que solo cubre
-        # la clasificacion del supervisor).
-        mock_llm.return_value = '{"agente": "faq", "intencion_compra_real": true}'
+        # No se crea CustomSpecialist "ventas": el registro real de este bot
+        # solo tiene "comercial". LA DEFENSA: con intencion_compra_real=true
+        # pero sin "ventas" en el registro, el override NO puede disparar y el
+        # agente queda el que resolvio la clasificacion normal. Sin esta guarda
+        # el grafo intentaria rutear a un especialista que no existe.
+        #
+        # El override sigue siendo codigo VIVO en este bot aunque "ventas" no
+        # sea un especialista de codigo: se puede crear un "ventas" desde el
+        # panel como CustomSpecialist, que es justo lo que hace `_crear_ventas`
+        # en los tests hermanos.
+        mock_llm.return_value = '{"agente": "comercial", "intencion_compra_real": true}'
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "aca tiene la info", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -1980,7 +2071,7 @@ class SupervisorIntencionCompraTest(TransactionTestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state())
 
-        self.assertEqual(result["active_agent"], "faq")
+        self.assertEqual(result["active_agent"], "comercial")
 
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
@@ -1990,7 +2081,7 @@ class SupervisorIntencionCompraTest(TransactionTestCase):
         # _ainvoke_with_retry (que solo cubre la clasificacion del
         # supervisor), igual que en test_intencion_compra_real_true_promueve...
         self._crear_ventas()
-        mock_llm.side_effect = ['{"agente": "agendamiento", "intencion_compra_real": false}']
+        mock_llm.side_effect = ['{"agente": "comercial", "intencion_compra_real": false}']
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "dale, para cuando?", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -2001,15 +2092,15 @@ class SupervisorIntencionCompraTest(TransactionTestCase):
         mock_get_llm.return_value = llm_base
 
         graph = get_flow_graph()
-        result = self._run(graph, self._initial_state(active_agent="agendamiento"))
+        result = self._run(graph, self._initial_state(active_agent="comercial"))
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
 
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
     def test_intencion_compra_real_ausente_sin_cambio(self, mock_llm, mock_get_llm):
         self._crear_ventas()
-        mock_llm.side_effect = ['{"agente": "agendamiento"}']
+        mock_llm.side_effect = ['{"agente": "comercial"}']
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "dale, para cuando?", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -2020,9 +2111,9 @@ class SupervisorIntencionCompraTest(TransactionTestCase):
         mock_get_llm.return_value = llm_base
 
         graph = get_flow_graph()
-        result = self._run(graph, self._initial_state(active_agent="agendamiento"))
+        result = self._run(graph, self._initial_state(active_agent="comercial"))
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
 
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
@@ -2613,8 +2704,13 @@ class CampanaComercialRoutingTest(TestCase):
     # PRE_ROUTING_RULES.clear() en su tearDown sin restaurar el dict
     # original, asi que depender del estado ambiente seria no
     # determinista segun el orden de ejecucion).
+    # InTouch: el destino es "comercial" y no "agendamiento" -- este bot
+    # registra un solo especialista y el registro real ya no resuelve el
+    # heredado. Lo que la clase verifica (el plumbing del grafo dado un
+    # campaign_hint: que el supervisor NO se llame) no depende del slug, como
+    # dice su propio comentario de arriba.
     def setUp(self):
-        PRE_ROUTING_RULES["servicio_tecnico_mantencion"] = CampaignRule(default_agent="agendamiento")
+        PRE_ROUTING_RULES["servicio_tecnico_mantencion"] = CampaignRule(default_agent="comercial")
 
     def tearDown(self):
         PRE_ROUTING_RULES.pop("servicio_tecnico_mantencion", None)
@@ -2655,7 +2751,7 @@ class CampanaComercialRoutingTest(TestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state())
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
         llm_con_tools.ainvoke.assert_called_once()
 
 

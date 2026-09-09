@@ -3,6 +3,21 @@
 Reemplaza a los tests de wsp_demo que apuntaban a VehiculoCatalogo (ver los
 @skip en test_agents.py): en este bot el precio sale de la planilla comercial,
 no del scraper.
+
+Dominio automotriz desregistrado, no borrado (ver CLAUDE.md): se conserva
+porque prueba defensas reales de la biblia §IV.1 sobre los modelos
+VehiculoUsado/LeadComercial/VehiculoPartePago/Servicio/Sucursal/Reserva, que
+siguen existiendo aunque este bot no los rutee.
+
+Se sacó `ImportadorTest` (probaba `fila_a_campos` de
+`bot.management.commands.importar_stock_cavem`): ese comando no existe en
+este repo, se borró junto con el resto de lo específico de Cavem en el
+commit que copió el árbol (9429197, "Borrado lo de Cavem: seeds, stock,
+fixtures del RAG..."). InTouch no tiene una planilla de stock que importar,
+así que no hay nada que reapuntar. Fue ese import roto el que tumbaba todo
+el módulo (y, en cadena, `test_simulator_code_evaluators.py`, que importa
+`crear_vehiculo` desde acá) -- el resto de la cobertura de este archivo
+nunca estuvo rota.
 """
 import asyncio
 from unittest.mock import patch
@@ -15,7 +30,6 @@ from bot.business.usados import (
     _buscar_vehiculos_impl, _consultar_ficha_vehiculo_impl, _resolver_precio_usado,
 )
 from bot.business.ventas import _simular_financiamiento_impl, _simular_por_cuota_impl
-from bot.management.commands.importar_stock_cavem import fila_a_campos
 from bot.models import (
     Conversation, LeadComercial, Message, VehiculoPartePago, VehiculoUsado,
 )
@@ -30,36 +44,6 @@ def crear_vehiculo(**kwargs):
     }
     datos.update(kwargs)
     return VehiculoUsado.objects.create(**datos)
-
-
-class ImportadorTest(TestCase):
-    def test_no_importa_los_links_placeholder_de_la_planilla(self):
-        # Las 36 filas traen https://demo.valten.cl/... , un dominio que no
-        # existe, y `_consultar_ficha_vehiculo_impl` entrega estos campos dentro
-        # del resultado de la tool: el LLM los toma como dato verificado y le
-        # manda al cliente un link muerto. Si alguien vuelve a mapear esas
-        # columnas sin URLs reales, esto se cae.
-        campos = fila_a_campos({
-            "Código": "US011", "Marca": "Suzuki", "Modelo": "Swift",
-            "Link Ficha Demo": "https://demo.valten.cl/us011",
-            "Link Fotos Demo": "https://demo.valten.cl/us011/fotos",
-        })
-        self.assertNotIn("link_ficha", campos)
-        self.assertNotIn("link_fotos", campos)
-
-    def test_transmision_con_tilde_se_reconoce_como_automatica(self):
-        # Bug real al cargar la planilla: `"automat" in "automática".lower()`
-        # es False (la sexta letra es "á"), y los 36 vehiculos quedaron con
-        # es_automatico=False -- "busco un auto automatico" (docx S24) habria
-        # devuelto cero resultados en la demo.
-        campos = fila_a_campos({"Transmisión": "Automática CVT", "ID": "US001"})
-        self.assertTrue(campos["es_automatico"])
-
-    def test_transmision_mecanica_no_se_marca_automatica(self):
-        self.assertFalse(fila_a_campos({"Transmisión": "Mecánica 5MT", "ID": "US002"})["es_automatico"])
-
-    def test_precio_con_separadores_de_miles_se_parsea_a_entero(self):
-        self.assertEqual(fila_a_campos({"Precio Lista CLP": "$21.990.000", "ID": "US003"})["precio_lista"], 21990000)
 
 
 class PrecioVigenteTest(TestCase):

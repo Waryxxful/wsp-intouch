@@ -5,6 +5,9 @@ que tiene: una taxonomía de otro rubro le hace poner "financiamiento" a un
 párrafo sobre Contact Center, y después el filtro por categoría no encuentra
 nada.
 """
+import re
+from pathlib import Path
+
 from django.test import SimpleTestCase, override_settings
 
 
@@ -31,6 +34,21 @@ class CategoriasTest(SimpleTestCase):
         self.assertNotIn("concesionaria", PROMPT_CLASIFICACION.lower())
         self.assertIn("InTouch", PROMPT_CLASIFICACION)
 
+    def test_los_prompts_del_indexador_no_vosean(self):
+        # El prompt global prohíbe vosear, así que el corpus no puede vosear:
+        # el modelo imita su corpus, no sólo lo obedece. `_PROMPT_HECHOS_DOCUMENTO`
+        # traía "inferilo del título" y "a cada hecho asignale" en las líneas
+        # nuevas, y es un camino que sí se usa (cada documento indexado).
+        from bot.rag.indexador import _PROMPT_HECHOS_DOCUMENTO, PROMPT_CLASIFICACION
+
+        for prompt in (_PROMPT_HECHOS_DOCUMENTO, PROMPT_CLASIFICACION):
+            texto = prompt.lower()
+            for forma in ("inferilo", "asignale", "asignalo", "clasificalo",
+                          "tenes", "podes", "debes vos", "reescribi ",
+                          "agrupa vos", "separa vos"):
+                with self.subTest(forma=forma):
+                    self.assertNotIn(forma, texto)
+
     def test_el_prompt_de_clasificacion_lista_las_categorias(self):
         # Si el prompt y la constante divergen, el LLM devuelve una categoría
         # que el filtro no conoce y el chunk queda inalcanzable.
@@ -38,6 +56,65 @@ class CategoriasTest(SimpleTestCase):
 
         for categoria in CATEGORIAS_RAG:
             self.assertIn(categoria, PROMPT_CLASIFICACION, categoria)
+
+
+class NingunFixtureUsaUnaCategoriaQueNoExisteTest(SimpleTestCase):
+    """El invariante que este proyecto ya pagó una vez.
+
+    Cuando la taxonomía pasó de automotriz a B2B quedaron ~20 fixtures con las
+    categorías viejas (`vehiculo_specs`, `precio_financiamiento`, `garantia`,
+    `sucursales`). NINGUNO fallaba, y por eso pasaron la review anterior: el
+    chunk se inserta igual, el rerank ordena igual, y una categoría que el
+    filtro no conoce no levanta nada. Lo que sí dejaron fue dos clases
+    mentirosas -- `HechosDeDocumentoTest` pasaba por el camino de coerción a
+    "otro" creyendo probar el camino feliz, y otro test afirmaba que una
+    categoría imposible llega a Supabase.
+
+    Este test es lo que faltaba: sin él, la próxima vez que la taxonomía cambie
+    la deriva vuelve a entrar en silencio.
+
+    Se lee el CÓDIGO FUENTE y no los objetos porque los fixtures viven dentro
+    de métodos y mocks: no hay forma de enumerarlos por introspección sin
+    correrlos. Sólo se mira la forma de diccionario -- la clave `categoria`
+    entre comillas, seguida de dos puntos y un literal -- que es la de un chunk
+    del RAG; la forma de kwarg (`categoria=`) es la de un modelo de Django, y
+    `SolucionInTouch.categoria` tiene su propia taxonomía casi homónima que no
+    es esta.
+
+    Para un fixture deliberadamente inválido, el marcador va en LA MISMA LÍNEA:
+    `taxonomia-invalida-a-proposito`.
+    """
+
+    MARCADOR = "taxonomia-invalida-a-proposito"
+    _RE_CATEGORIA = re.compile(r'"categoria"\s*:\s*"([^"]*)"')
+
+    def _archivos(self):
+        raiz = Path(__file__).resolve().parent.parent
+        return sorted(raiz.glob("tests/*.py")) + sorted(raiz.glob("rag_eval/*.py"))
+
+    def test_toda_categoria_literal_de_la_suite_esta_en_categorias_rag(self):
+        from bot.rag.indexador import CATEGORIAS_RAG
+
+        validas = set(CATEGORIAS_RAG)
+        revisados = 0
+        for archivo in self._archivos():
+            lineas = archivo.read_text(encoding="utf-8").splitlines()
+            for numero, linea in enumerate(lineas):
+                for categoria in self._RE_CATEGORIA.findall(linea):
+                    if self.MARCADOR in linea:
+                        continue
+                    revisados += 1
+                    with self.subTest(archivo=archivo.name, linea=numero + 1):
+                        self.assertIn(
+                            categoria, validas,
+                            f"{archivo.name}:{numero + 1} usa la categoría "
+                            f"'{categoria}', que no está en CATEGORIAS_RAG. Un "
+                            f"chunk con esa etiqueta queda inalcanzable para el "
+                            f"filtro por categoría, y ningún test lo grita.")
+        # Si el escáner deja de encontrar fixtures (un refactor de rutas, un
+        # cambio de forma), este test pasaría vacío y el invariante quedaría sin
+        # dueño otra vez.
+        self.assertGreater(revisados, 10)
 
 
 class ExtractorDeScrapingTest(SimpleTestCase):

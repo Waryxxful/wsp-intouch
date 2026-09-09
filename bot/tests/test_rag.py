@@ -457,8 +457,8 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         self, mock_hechos, mock_embeddings_client, mock_get_client,
     ):
         mock_hechos.return_value = [
-            {"texto": "Renault Koleos: 7 bolsas de aire.", "categoria": "vehiculo_specs"},
-            {"texto": "Renault Koleos: precio desde $27.990.000.", "categoria": "precio_financiamiento"},
+            {"texto": "InTouch: agentes conversacionales en WhatsApp, voz y chat.", "categoria": "soluciones"},
+            {"texto": "InTouch: paneles de supervisión y dashboards en Power BI.", "categoria": "analitica"},
         ]
         mock_embeddings = MagicMock()
         mock_embeddings.embed_documents.return_value = [[0.1], [0.2]]
@@ -473,9 +473,9 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         mock_hechos.assert_awaited_once_with("texto crudo del pdf")
         filas = mock_cliente.table.return_value.insert.call_args[0][0]
         self.assertEqual(len(filas), 2)
-        self.assertEqual(filas[0]["contenido"], "Renault Koleos: 7 bolsas de aire.")
-        self.assertEqual(filas[0]["categoria"], "vehiculo_specs")
-        self.assertEqual(filas[1]["categoria"], "precio_financiamiento")
+        self.assertEqual(filas[0]["contenido"], "InTouch: agentes conversacionales en WhatsApp, voz y chat.")
+        self.assertEqual(filas[0]["categoria"], "soluciones")
+        self.assertEqual(filas[1]["categoria"], "analitica")
         self.assertTrue(resultado)
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
@@ -488,7 +488,7 @@ class IndexarPaginaEnSupabaseTest(TestCase):
         # La categoria de un documento ya viene puesta por _hechos_de_documento --
         # llamar tambien a _clasificar_chunk (que usa _get_llm) seria clasificar
         # dos veces el mismo contenido, gastando LLM de mas.
-        mock_hechos.return_value = [{"texto": "un hecho", "categoria": "vehiculo_specs"}]
+        mock_hechos.return_value = [{"texto": "un hecho", "categoria": "soluciones"}]
         mock_embeddings = MagicMock()
         mock_embeddings.embed_documents.return_value = [[0.1]]
         mock_embeddings_client.return_value = mock_embeddings
@@ -589,15 +589,16 @@ class ConsultarBaseConocimientoImplTest(TestCase):
     def test_ok_true_con_los_chunks_que_sobrevivieron_el_rerank(self, mock_buscar, mock_rerank):
         from bot.rag.tool import _consultar_base_conocimiento_impl
         mock_buscar.return_value = [
-            {"contenido": "la garantia dura 36 meses", "fuente_url": "https://renault.cl/garantia/", "categoria": "garantia"},
+            {"contenido": "el Contact Center se opera en modalidad hibrida",
+             "fuente_url": "https://in-touch.cl/modelos-de-operacion/", "categoria": "modelos_operacion"},
         ]
         mock_rerank.return_value = mock_buscar.return_value
 
-        resultado = asyncio.run(_consultar_base_conocimiento_impl("cuanto dura la garantia", []))
+        resultado = asyncio.run(_consultar_base_conocimiento_impl("como operan el contact center", []))
 
         self.assertTrue(resultado["ok"])
-        self.assertEqual(resultado["resultados"][0]["texto"], "la garantia dura 36 meses")
-        self.assertEqual(resultado["resultados"][0]["fuente"], "https://renault.cl/garantia/")
+        self.assertEqual(resultado["resultados"][0]["texto"], "el Contact Center se opera en modalidad hibrida")
+        self.assertEqual(resultado["resultados"][0]["fuente"], "https://in-touch.cl/modelos-de-operacion/")
 
     @patch("bot.rag.tool._rerankear", new_callable=AsyncMock)
     @patch("bot.rag.tool._buscar_en_supabase", new_callable=AsyncMock)
@@ -661,9 +662,12 @@ class ConsultarBaseConocimientoToolTest(TestCase):
 class RerankearTest(TestCase):
     def _chunks(self):
         return [
-            {"contenido": "la garantia dura 36 meses", "fuente_url": "https://renault.cl/garantia/", "categoria": "garantia"},
-            {"contenido": "sucursal en providencia", "fuente_url": "https://renault.cl/sucursales/", "categoria": "sucursales"},
-            {"contenido": "precio del arkana", "fuente_url": "https://renault.cl/cotizar/arkana/", "categoria": "precio_financiamiento"},
+            {"contenido": "el Contact Center se opera en modalidad hibrida",
+             "fuente_url": "https://in-touch.cl/modelos-de-operacion/", "categoria": "modelos_operacion"},
+            {"contenido": "paneles de supervision y dashboards en Power BI",
+             "fuente_url": "https://in-touch.cl/analitica/", "categoria": "analitica"},
+            {"contenido": "integracion con el CRM y el ERP de la empresa",
+             "fuente_url": "https://in-touch.cl/integraciones/", "categoria": "integraciones"},
         ]
 
     def _mock_response(self, mock_post, resultados):
@@ -681,20 +685,20 @@ class RerankearTest(TestCase):
             {"index": 1, "relevance_score": 0.05},
         ])
 
-        resultado = asyncio.run(_rerankear("cuanto cuesta el arkana", self._chunks()))
+        resultado = asyncio.run(_rerankear("se integra con mi CRM", self._chunks()))
 
-        self.assertEqual([c["categoria"] for c in resultado], ["precio_financiamiento", "garantia"])
+        self.assertEqual([c["categoria"] for c in resultado], ["integraciones", "modelos_operacion"])
 
     @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
     def test_manda_el_payload_esperado_a_openrouter(self, mock_post):
         from bot.rag.tool import _rerankear, _RERANK_MODEL
         self._mock_response(mock_post, [])
 
-        asyncio.run(_rerankear("cuanto cuesta el arkana", self._chunks()))
+        asyncio.run(_rerankear("se integra con mi CRM", self._chunks()))
 
         _, kwargs = mock_post.call_args
         self.assertEqual(kwargs["json"]["model"], _RERANK_MODEL)
-        self.assertEqual(kwargs["json"]["query"], "cuanto cuesta el arkana")
+        self.assertEqual(kwargs["json"]["query"], "se integra con mi CRM")
         self.assertEqual(kwargs["json"]["documents"], [c["contenido"] for c in self._chunks()])
         self.assertIn("top_n", kwargs["json"])
         self.assertIn("Bearer", kwargs["headers"]["Authorization"])
@@ -740,7 +744,7 @@ class RerankearTest(TestCase):
         mock_resp.raise_for_status = MagicMock()
         mock_post.return_value = mock_resp
 
-        resultado = asyncio.run(_rerankear("cuanto cuesta el arkana", self._chunks()))
+        resultado = asyncio.run(_rerankear("se integra con mi CRM", self._chunks()))
         self.assertEqual(resultado, self._chunks())
         self.assertEqual(mock_post.call_count, 1)
 
@@ -749,7 +753,7 @@ class RerankearTest(TestCase):
         from bot.rag.tool import _rerankear
         self._mock_response(mock_post, [{"index": 99, "relevance_score": 0.9}])
 
-        resultado = asyncio.run(_rerankear("cuanto cuesta el arkana", self._chunks()))
+        resultado = asyncio.run(_rerankear("se integra con mi CRM", self._chunks()))
         self.assertEqual(resultado, self._chunks())
         self.assertEqual(mock_post.call_count, 1)
 
@@ -768,7 +772,7 @@ class HechosDeDocumentoTest(TestCase):
         mock_llm = MagicMock()
         mock_get_llm.return_value = mock_llm
         mock_ainvoke.return_value = json.dumps({
-            "hechos": [{"texto": "hecho", "categoria": "vehiculo_specs"}],
+            "hechos": [{"texto": "hecho", "categoria": "soluciones"}],
         })
 
         from bot.rag.indexador import _hechos_de_documento
@@ -786,7 +790,7 @@ class HechosDeDocumentoTest(TestCase):
         mock_get_llm.return_value = MagicMock()
         texto_largo = "x" * 4001
         mock_ainvoke.return_value = json.dumps({
-            "hechos": [{"texto": texto_largo, "categoria": "vehiculo_specs"}],
+            "hechos": [{"texto": texto_largo, "categoria": "soluciones"}],
         })
 
         from bot.rag.indexador import _hechos_de_documento
@@ -796,6 +800,11 @@ class HechosDeDocumentoTest(TestCase):
         self.assertTrue(any("4001" in mensaje for mensaje in logs.output))
         # visibilidad solamente: el hecho no se trunca ni se modifica
         self.assertEqual(resultado[0]["texto"], texto_largo)
+        # La categoria del fixture tiene que estar en CATEGORIAS_RAG, o
+        # `_hechos_de_documento` la coacciona a "otro" y este test pasa por el
+        # camino de ERROR creyendo probar el feliz -- era el caso con
+        # "vehiculo_specs", heredado del bot automotriz.
+        self.assertEqual(resultado[0]["categoria"], "soluciones")
 
     @patch("bot.scraping.extractor._get_llm", new_callable=AsyncMock)
     @patch("bot.scraping.extractor._ainvoke_with_retry", new_callable=AsyncMock)
@@ -803,7 +812,7 @@ class HechosDeDocumentoTest(TestCase):
         mock_get_llm.return_value = MagicMock()
         texto_corto = "x" * 100
         mock_ainvoke.return_value = json.dumps({
-            "hechos": [{"texto": texto_corto, "categoria": "vehiculo_specs"}],
+            "hechos": [{"texto": texto_corto, "categoria": "soluciones"}],
         })
 
         from bot.rag.indexador import _hechos_de_documento
@@ -840,7 +849,10 @@ class HechosDeDocumentoTest(TestCase):
         mock_ainvoke.return_value = json.dumps({
             "hechos": [
                 {"texto": "hecho valido", "categoria": "soluciones"},
-                {"texto": "hecho con categoria inventada", "categoria": "categoria_que_no_existe"},
+                # Este test prueba justamente la coercion a "otro" de una
+                # categoria que el filtro no conoce, asi que el fixture tiene
+                # que ser invalido a proposito.
+                {"texto": "hecho con categoria inventada", "categoria": "categoria_que_no_existe"},  # taxonomia-invalida-a-proposito
             ]
         })
 
@@ -886,8 +898,8 @@ class HechosDeDocumentoTest(TestCase):
         mock_get_llm.return_value = MagicMock()
         mock_ainvoke.return_value = json.dumps({
             "hechos": [
-                {"categoria": "vehiculo_specs"},
-                {"categoria": "precio_financiamiento"},
+                {"categoria": "soluciones"},
+                {"categoria": "analitica"},
             ]
         })
 
@@ -946,8 +958,10 @@ class RerankReintentoTest(TestCase):
 
     def _chunks(self):
         return [
-            {"contenido": "la garantia dura 12 meses", "fuente_url": "https://cavem.cl/garantia/", "categoria": "garantia"},
-            {"contenido": "sucursal en providencia", "fuente_url": "https://cavem.cl/sucursales/", "categoria": "sucursales"},
+            {"contenido": "el tratamiento de datos cumple la ley 21.719",
+             "fuente_url": "https://in-touch.cl/datos-y-seguridad/", "categoria": "datos_y_seguridad"},
+            {"contenido": "paneles de supervision y dashboards",
+             "fuente_url": "https://in-touch.cl/analitica/", "categoria": "analitica"},
         ]
 
     def _respuesta_ok(self, resultados):
@@ -974,10 +988,10 @@ class RerankReintentoTest(TestCase):
             self._respuesta_ok([{"index": 0, "relevance_score": 0.9}]),
         ]
 
-        resultado = asyncio.run(_rerankear("cuanto dura la garantia", self._chunks()))
+        resultado = asyncio.run(_rerankear("como tratan mis datos", self._chunks()))
 
         self.assertEqual(mock_post.call_count, 2)
-        self.assertEqual([c["categoria"] for c in resultado], ["garantia"])
+        self.assertEqual([c["categoria"] for c in resultado], ["datos_y_seguridad"])
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
     @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
@@ -997,7 +1011,7 @@ class RerankReintentoTest(TestCase):
         from bot.rag.tool import _rerankear, _RERANK_MAX_INTENTOS
         mock_post.return_value = self._respuesta_error(429)
 
-        resultado = asyncio.run(_rerankear("cuanto dura la garantia", self._chunks()))
+        resultado = asyncio.run(_rerankear("como tratan mis datos", self._chunks()))
 
         self.assertEqual(mock_post.call_count, _RERANK_MAX_INTENTOS)
         self.assertEqual(resultado, self._chunks())
@@ -1011,7 +1025,7 @@ class RerankReintentoTest(TestCase):
         mock_post.return_value = self._respuesta_error(429)
 
         with self.assertLogs("bot.rag.tool", level="ERROR") as capturado:
-            asyncio.run(_rerankear("cuanto dura la garantia", self._chunks()))
+            asyncio.run(_rerankear("como tratan mis datos", self._chunks()))
 
         registro = "\n".join(capturado.output)
         self.assertIn("429", registro)

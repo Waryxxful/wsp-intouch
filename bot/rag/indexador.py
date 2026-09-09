@@ -78,10 +78,10 @@ _PROMPT_HECHOS_DOCUMENTO = """Este es el texto extraído de un documento (ficha 
 
 Tu tarea: reescribir el contenido como una lista de HECHOS independientes, cada uno autocontenido (se entiende sin leer los demás). Reglas:
 
-- Cada hecho debe mencionar explícitamente la solución, canal, modelo de operación o tema al que se refiere (ej. "Analítica de InTouch: dashboards en Power BI con control de calidad..."), aunque el texto original no lo repita en cada línea -- inferilo del título/contexto del documento.
+- Cada hecho debe mencionar explícitamente la solución, canal, modelo de operación o tema al que se refiere (ej. "Analítica de InTouch: dashboards en Power BI con control de calidad..."), aunque el texto original no lo repita en cada línea -- infiérelo del título/contexto del documento.
 - No inventes ni completes datos que no estén en el texto. Si un dato está en el original, se preserva literal.
 - Agrupa detalles muy relacionados en un mismo hecho (ej. los canales que cubre una misma solución van juntos), pero separa temas distintos (soluciones, modelos de operación, canales, analítica, integraciones, datos y seguridad) en hechos distintos.
-- A cada hecho asignale UNA categoría de esta lista exacta: {categorias}
+- A cada hecho asígnale UNA categoría de esta lista exacta: {categorias}
 
 Texto:
 {texto}

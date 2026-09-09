@@ -65,7 +65,8 @@ class EvaluarRagCommandTest(TestCase):
         pregunta = PreguntaEvaluacionRag.objects.create(
             query="cuanto dura la garantia", fuente_esperada="https://renault.cl/garantia/",
         )
-        chunk = {"contenido": "36 meses", "fuente_url": "https://renault.cl/garantia/", "categoria": "garantia"}
+        chunk = {"contenido": "modalidad hibrida", "fuente_url": "https://renault.cl/garantia/",
+                 "categoria": "modelos_operacion"}
         mock_buscar.return_value = [chunk]
         mock_rerank.return_value = [chunk]
         mock_juez.return_value = 5

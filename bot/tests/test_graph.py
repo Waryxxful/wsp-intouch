@@ -1442,8 +1442,9 @@ class BusinessActionNodeConsultarBaseConocimientoTest(TransactionTestCase):
     @patch("bot.rag.tool._buscar_en_supabase", new_callable=AsyncMock)
     def test_resultado_relevante_devuelve_ok_true(self, mock_buscar, mock_rerank):
         chunk = {
-            "contenido": "la garantia es de 3 anios", "fuente_url": "https://renault.cl/garantia/",
-            "categoria": "garantia", "similarity": 0.8,
+            "contenido": "el Contact Center se opera en modalidad hibrida",
+            "fuente_url": "https://in-touch.cl/modelos-de-operacion/",
+            "categoria": "modelos_operacion", "similarity": 0.8,
         }
         mock_buscar.return_value = [chunk]
         mock_rerank.return_value = [chunk]
@@ -1455,7 +1456,7 @@ class BusinessActionNodeConsultarBaseConocimientoTest(TransactionTestCase):
         contenido = json.loads(result["tool_messages"][-1].content)
         self.assertTrue(contenido["ok"])
         self.assertEqual(contenido["resultados"][0]["texto"], "la garantia es de 3 anios")
-        self.assertEqual(contenido["resultados"][0]["categoria"], "garantia")
+        self.assertEqual(contenido["resultados"][0]["categoria"], "modelos_operacion")
 
     @patch("bot.rag.tool._rerankear", new_callable=AsyncMock)
     @patch("bot.rag.tool._buscar_en_supabase", new_callable=AsyncMock)

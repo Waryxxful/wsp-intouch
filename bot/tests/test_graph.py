@@ -187,7 +187,12 @@ class GraphSmokeTest(TestCase):
 
     @patch("bot.flow.graph._get_llm")
     def test_pre_routing_deterministico_evita_llamar_al_llm(self, mock_get_llm):
-        PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(default_agent="agendamiento")
+        # InTouch (Task 8, spec §2.2): "comercial" es el unico especialista
+        # registrado -- adaptado de "agendamiento" (heredado de Cavem, ahora en
+        # AGENTES_NO_REGISTRADOS). La defensa que este test cubre (el pre-ruteo
+        # deterministico evita la llamada al LLM del supervisor) no depende de
+        # que slug se use como destino.
+        PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(default_agent="comercial")
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "listo", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -200,13 +205,16 @@ class GraphSmokeTest(TestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
         llm_con_tools.ainvoke.assert_called_once()  # solo el LLM del especialista, no el del supervisor
 
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
     def test_sin_campaign_hint_el_supervisor_clasifica_con_el_llm(self, mock_llm, mock_get_llm):
-        mock_llm.return_value = '{"agente": "agendamiento"}'
+        # InTouch (Task 8): "comercial" es el unico slug que el registro real
+        # acepta -- adaptado de "agendamiento". La defensa (el supervisor usa
+        # la clasificacion del LLM) no depende del slug concreto.
+        mock_llm.return_value = '{"agente": "comercial"}'
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "dale, para cuando?", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -219,13 +227,20 @@ class GraphSmokeTest(TestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state())
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
         self.assertEqual(result["response_text"], "dale, para cuando?")
         mock_llm.assert_called_once()  # solo el supervisor
         llm_con_tools.ainvoke.assert_called_once()  # solo el especialista
 
     @patch("bot.flow.graph._get_llm")
     def test_especialista_pide_business_action_y_el_grafo_la_ejecuta(self, mock_get_llm):
+        # InTouch (Task 8): "agendamiento" ya no esta en AGENTS, asi que el
+        # registro real del grafo no lo resolveria -- se reinyecta SOLO para
+        # este test via build_agent_registry parchado (mismo patron que
+        # BusinessActionNodeCrearLeadTest/RegistrarNoContactarTest mas abajo en
+        # este archivo), para seguir probando la ejecucion real de una tool
+        # bindeada de bot.business (consultar_disponibilidad) en vez de
+        # debilitar la prueba a un tool_call generico.
         PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(default_agent="agendamiento")
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.side_effect = [
@@ -252,7 +267,8 @@ class GraphSmokeTest(TestCase):
         # consultar_disponibilidad (definida en bot.business.agendamiento) lee
         # el nombre desde los globals de su propio modulo, asi que parchear
         # el atributo del barrel no lo intercepta.
-        with patch("bot.business.agendamiento._consultar_disponibilidad_impl", return_value=[{"hora": "09:00"}]):
+        with patch("bot.business.agendamiento._consultar_disponibilidad_impl", return_value=[{"hora": "09:00"}]), \
+             patch("bot.flow.graph.build_agent_registry", return_value={"agendamiento": AgendamientoAgent()}):
             graph = get_flow_graph()
             result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
 
@@ -269,6 +285,10 @@ class GraphSmokeTest(TestCase):
         # BaseTool.ainvoke usa run_in_executor para tools sin implementacion async nativa
         # (ver langchain_core/tools/base.py), asi que corre en otro thread -- este test
         # sigue siendo la regresion real a vigilar, solo cambia como se inyecta el fake.
+        #
+        # InTouch (Task 8): "agendamiento" ya no esta en AGENTS -- se reinyecta
+        # via build_agent_registry parchado (igual que en el test de arriba)
+        # para seguir usando el vehiculo real del fake tool sincrono.
         from langchain.tools import tool
 
         @tool("consultar_disponibilidad")
@@ -295,8 +315,9 @@ class GraphSmokeTest(TestCase):
         llm_base.bind_tools.return_value = llm_con_tools
         mock_get_llm.return_value = llm_base
 
-        graph = get_flow_graph()
-        result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
+        with patch("bot.flow.graph.build_agent_registry", return_value={"agendamiento": AgendamientoAgent()}):
+            graph = get_flow_graph()
+            result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
 
         self.assertEqual(json.loads(result["tool_messages"][-1].content), [])
 
@@ -310,12 +331,16 @@ class GraphSmokeTest(TestCase):
         # loop corriendo en ese thread (graph.ainvoke). Usamos la conexion 'default'
         # (sqlite) para reproducir la misma clase de error sin necesitar la conexion
         # 'business' (SQL Server).
+        #
+        # InTouch (Task 8): el override devuelve "comercial" (adaptado de
+        # "agendamiento") -- la defensa es la consulta sincrona real dentro del
+        # override, no el slug al que resuelve.
         def fake_override(state):
             list(Conversation.objects.all())
-            return "agendamiento"
+            return "comercial"
 
         PRE_ROUTING_RULES["agendar_hora"] = CampaignRule(
-            default_agent="agendamiento", override=fake_override
+            default_agent="comercial", override=fake_override
         )
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
@@ -329,7 +354,7 @@ class GraphSmokeTest(TestCase):
         graph = get_flow_graph()
         result = self._run(graph, self._initial_state(campaign_hint="agendar_hora"))
 
-        self.assertEqual(result["active_agent"], "agendamiento")
+        self.assertEqual(result["active_agent"], "comercial")
 
     @patch("bot.flow.graph._get_llm")
     def test_specialist_node_acumula_extracted_data_en_flow_data(self, mock_get_llm):

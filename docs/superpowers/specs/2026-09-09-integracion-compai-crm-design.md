@@ -1,6 +1,12 @@
 # Integración Comp AI CRM ↔ wsp_intouch — diseño
 
-Fecha: 2026-09-09 · Estado: **DISEÑO, SIN IMPLEMENTAR**
+Fecha: 2026-09-09 · Estado: **DISEÑO, SIN IMPLEMENTAR** · Revisado el 2026-09-09
+tras una revisión externa de los planes.
+
+Los planes hermanos (`docs/superpowers/plans/2026-09-09-compai-crm-*.md`) son la
+fuente para ejecutar; este documento es el diseño y el registro de lo que se
+inspeccionó en el servidor. Las secciones §2.3, §2.4, §6.1 y §6.3 se corrigieron
+después de esa revisión y llevan la marca **[corregido]**.
 
 Origen del encargo: `/home/admincrm/prompt/prompt_integracion_crm_bot.md` (v1.0).
 Ese prompt se redactó sin inspeccionar este servidor y lo dice explícitamente.
@@ -199,7 +205,12 @@ los `*.contracts.ts`). Reglas no negociables:
 `DECISION_MAKER_BOUGHT_IN`, `CONTRACT_SENT`, `CLOSED_WON`, `CLOSED_LOST`.
 El default del schema es `DEMO_BOOKED`.
 
-**Etapa inicial única: `QUALIFIED_TO_BUY`**, para todo Deal que abra el bot.
+**Etapa inicial: `QUALIFIED_TO_BUY`, elegida deliberadamente y no por
+descarte.** Es la menos incorrecta del enum instalado, no la correcta: afirma
+que alguien calificó al contacto como apto para comprar, y lo que pasó es que
+un bot recogió antecedentes. Queda anotada como decisión en el `RUNBOOK.md`; si
+el equipo comercial define una etapa de entrada, se cambia ahí y en el test que
+la ancla.
 
 Por qué, campo por campo:
 - `DEMO_BOOKED` **afirmaría una demo agendada**. El bot de InTouch no agenda
@@ -221,7 +232,13 @@ explícita es un hecho comercial aunque el score no haya llegado.
 **`Deal.stage` no se toca nunca después de crearlo** (prompt §C01): ningún
 evento del bot devuelve una oportunidad `CLOSED_WON` a `QUALIFIED_TO_BUY`.
 
-### 2.3 — Resolución de identidad
+### 2.3 — Resolución de identidad **[corregido]**
+
+**La resolución no escribe.** Son dos fases: una decide y devuelve un *plan*
+sin tocar la base, la otra lo ejecuta sólo si el plan completo es aceptable. El
+diseño anterior creaba la Company y *después* podía devolver conflicto de
+contacto, pero la transacción commiteaba igual: quedaba una empresa creada por
+un evento rechazado.
 
 El punto donde una fusión equivocada cuesta datos reales de un tercero. Ninguna
 regla adivina.
@@ -230,10 +247,13 @@ regla adivina.
 1. `domainFromEmail(correo)` — upstream, ya devuelve `null` para proveedores
    gratuitos y dominios de máquina. Si hay dominio → upsert de `Company` por
    `domain`. Es la única identificación fuerte.
-2. Sin dominio: **no se fusiona por nombre**. Se busca sólo entre companies que
-   *no tengan dominio* y que lleven el campo dinámico `origen = wsp_intouch`,
-   por nombre normalizado exacto. Así un "Acme" del bot no se mete dentro del
-   "Acme" real que cargó una persona.
+2. Sin dominio: **no se fusiona por nombre, ni entre companies sin dominio.**
+   Dos empresas homónimas pueden ser dos empresas distintas, y el nombre lo
+   declaró un contacto por WhatsApp. Lo único que permite reusar una fila es el
+   **vínculo de origen** (`LeadIngestEvent` con la misma `claveContacto`), que
+   es lo que prueba que esa fila la creó esta integración para este contacto.
+   Si después resulta que son la misma empresa, la fusiona una persona:
+   separarlas es posible, desfusionar no.
 3. Sin dominio y sin nombre de empresa → no se crea Company. El Contact queda
    sin empresa, que es la verdad.
 
@@ -247,7 +267,8 @@ puede devolver varias filas.
 | **Varios** matches por teléfono | **409 conflicto, cero escrituras.** No se adivina |
 | Sin teléfono, con correo (match único) | Se usa |
 | Teléfono y correo apuntan a **contactos distintos** | **409 conflicto, cero escrituras.** Son dos personas o un dato mal cargado; lo resuelve un humano |
-| Match por correo, y ese contacto ya tiene **otro** teléfono | Se usa ese contacto. **No se sobreescribe `Contact.phone`**: el número de WhatsApp va al campo dinámico `telefono_whatsapp` y se deja un `Activity` señalando la discrepancia |
+| Match por correo, y ese contacto ya tiene **otro** teléfono | **409 conflicto, cero escrituras.** Un correo escrito en una conversación no prueba posesión: vincular atribuiría esta conversación a un tercero |
+| El vínculo de origen apunta a un contacto archivado o borrado | **409 conflicto.** No se recrea en silencio: alguien decidió sacarlo, y un replay no puede resucitarlo |
 | Nada matchea | Se crea |
 
 Un 409 de identidad deja el lead **pendiente y visible** en el panel del bot
@@ -257,21 +278,36 @@ Nota sobre el unique parcial: existiendo un contacto **archivado** con el mismo
 correo, la restricción permite crear uno nuevo. Es el comportamiento de upstream
 y no lo cambiamos; queda anotado.
 
+Los conflictos no se acumulan sin salida: hay una operación administrativa
+—detrás de la sesión de GranCRM, nunca de la key del bot— que asocia una
+identidad y reejecuta el mismo evento **sin editar su payload**. Corregir el
+contenido exige un evento nuevo del productor. Es la Task 15 del plan.
+
+Y una carrera que el advisory lock por clave de contacto **no** cubre: dos
+claves distintas que comparten teléfono o correo toman locks distintos. Se
+resuelve con las restricciones existentes más locks sobre las identidades
+normalizadas en orden estable, y está cubierto por un test.
+
 ### 2.4 — La escritura
 
 Todo en un `prisma.$transaction` (prompt §C01: "si una ingesta crea varias
 filas, usa transacción para la parte local indivisible"):
 
-1. Company (upsert según §2.3).
-2. Contact (upsert según §2.3), `source: RecordSource.IMPORT`.
+1. Se ejecuta el plan de identidad de §2.3 — recién acá se escribe.
+2. Company y Contact según ese plan, `source: RecordSource.IMPORT`. No se
+   inventa `website` desde el dominio: lo presentaría como un sitio verificado.
 3. Deal, **sólo si corresponde** (§2.2), `stage: QUALIFIED_TO_BUY`,
    `ownerId` de configuración.
 4. `FieldValue` de los campos de calificación (§3).
 5. `Activity(NOTE)` con resumen y siguiente acción — es el lugar natural para
    texto libre no confiable y le da timeline al comercial.
-6. Si `solicita_contacto_humano`: además `Activity(TASK)` asignada al dueño.
-   **Eso** es lo que hace la petición accionable, y no un booleano olvidado
-   (prompt §6 punto 7, prueba I12).
+6. Si `solicita_contacto_humano` **o `solicita_consultoria`**: además un
+   `Activity(TASK)` con vencimiento. **Eso** es lo que hace la petición
+   accionable, y no un booleano olvidado (prompt §6 punto 7, prueba I12).
+   Va con una **clave de efecto** por contacto y tipo: el emisor manda el
+   objeto completo en cada revisión, así que sin la clave el comercial
+   recibiría una tarea nueva por cada mensaje. Una tarea ya completada no se
+   reabre.
 7. `LeadIngestEvent` sellado con el payload íntegro, su hash y los tres ids.
 
 `RecordSource` no tiene valor para bot/WhatsApp (`MANUAL`, `IMPORT`, `EMAIL`,
@@ -441,7 +477,7 @@ por SQL.
 Dos caminos distintos que no se sustituyen (prompt §3 punto 6): el bot contra la
 API, y el comercial contra la UI.
 
-### 6.1 — El bot: la API key da autenticación, no alcance
+### 6.1 — El bot: la API key da autenticación, no alcance **[corregido]**
 
 Verificado en `packages/auth/src/auth.ts` y `apps/api/src/api-keys/`:
 
@@ -468,7 +504,20 @@ El alcance se agrega explícitamente:
 4. Rate limit: el plugin lo tiene apagado globalmente, así que va un
    `limit_req` de nginx en la `location` de ingesta.
 
-Se verifica empíricamente con cinco casos (§9, I08), no por lectura.
+Y **el chequeo del punto 3 no alcanza por sí solo**: una key de un usuario con
+acceso total, verificada sólo en la ruta de ingesta, sigue sirviendo para leer
+contactos, exportar y tocar ajustes por cualquier otra ruta. Así que se **mide**
+contra qué otras rutas sirve la key (Task 2, Step 4) y, si abre el resto de la
+API, el diseño de la credencial cambia antes de seguir: o se le saca
+`enableSessionForAPIKeys` a esta key, o se monta una credencial de integración
+fuera de Better Auth verificada por un guard sólo en `/api/ingest`.
+
+Y el orden de los chequeos importa: si la key es inválida, el guard puede haber
+resuelto la sesión desde la **cookie** del navegador, y entonces el usuario de
+la sesión es un comercial y no la integración. Por eso se exige la cabecera
+antes de mirar la sesión.
+
+Se verifica empíricamente con siete casos (§9, I08), no por lectura.
 
 ### 6.2 — El comercial: puente `grancrm_session`
 
@@ -514,9 +563,37 @@ Claims reales que emite `core/jwt_utils.py::encode_token`: `jti`, `user_id`,
    el modo compatibilidad colapsa `agente` y `supervisor` en `ejecutivo`, y
    `admin_ti` en `sa`. Es la lección que InciTrack ya pagó (commit `95d5368`).
 
-Recién después se crea la sesión de Better Auth para el `User` que corresponde
-al `email`. `ALLOWED_SIGN_IN` sigue actuando como segunda puerta. El logout
-limpia las dos sesiones.
+Recién después se crea la sesión de Better Auth. **La identidad se vincula por
+cuenta + id estable del usuario de GranCRM, no por correo**: un upsert por
+`email` permitiría tomar una cuenta existente del CRM creando un usuario de
+GranCRM con ese mismo mail. Y no se marca `emailVerified`: GranCRM autenticó a
+la persona, no comprobó que sea dueña de esa dirección.
+`ALLOWED_SIGN_IN` sigue actuando como segunda puerta.
+
+### 6.3.1 — La autorización se revalida, no se concede una vez **[corregido]**
+
+El diseño anterior validaba **sólo al entrar**, y eso era un agujero real:
+después el CRM andaba con su propia cookie de Better Auth, así que un comercial
+que cerraba sesión en GranCRM —o al que le retiraban el rol o la cuenta— seguía
+entrando hasta que expirara la sesión local.
+
+Cada petición protegida comprueba tres cosas: que exista sesión local, que
+tenga vínculo de GranCRM, y que ese vínculo siga vigente en el orquestador.
+**Sin caché positiva entre peticiones** — cachear el "sí" es exactamente lo que
+permite seguir operando después de una revocación; se deduplica dentro de una
+misma petición. Vale para todas las superficies: tRPC, REST, SSR, server
+actions, exports y streams. El menú y el middleware del frontend no cuentan.
+
+El costo hay que **medirlo**, porque es una llamada al orquestador por petición
+en una app con SSR: si abrir una pantalla dispara decenas de revalidaciones, la
+salida es reducir las peticiones protegidas o negociar un TTL corto y
+explícito, con el número a la vista.
+
+**El límite, dicho sin prometer de más:** la revocación es efectiva en la
+siguiente comprobación autoritativa. Lo ya enviado al navegador no se retira, y
+una transacción autorizada y terminada no se cancela.
+
+El logout limpia las dos sesiones y borra el vínculo.
 
 `view_as_sa` (el "ver como" del SA) entra, porque así funciona el soporte, pero
 **nunca es dueño de un Deal** y se registra como impersonación.
@@ -586,7 +663,7 @@ bloquean el receptor, el pipeline ni la navegación.
 | I05 | Nueva calificación del mismo contacto | `updated`, `revision`+1, sin reset de etapa ni borrado de datos válidos |
 | I06 | Booleanos `false`, `true`, `null`, ausente y **el string `"false"`** | Semántica documentada; el string **no** se vuelve `true` |
 | I07 | JSON inválido, body enorme, arrays/enums/correo inválidos, clave desconocida | Error de entrada controlado; **ninguna escritura parcial** |
-| I08 | **Cinco casos**: key del principal de ingesta → 201 · key válida de **otro usuario** → 403 · sin key → 401 · key inválida → 401 · sólo cookie de navegador → 401/403 | El caso "otro usuario" es el que pasaría en silencio si se asumiera que las keys tienen permisos |
+| I08 | **Siete casos**: key del principal → 201 · key válida de **otro usuario** → 403 · sin key → 401 · key inválida → 401 · sólo cookie de comercial → 401/403 · **cookie válida + key inventada** → 401/403 · **la key de ingesta contra el resto de la API** → 401/403 | Los dos últimos son los que pasarían en silencio: uno confundiría la identidad de la cookie con la credencial, el otro deja una credencial de acceso total disfrazada de limitada |
 | I16 | Logs y respuestas de error | Correlación útil; sin secretos, sin stack, sin PII innecesaria |
 | I17 | Identidad: varios contactos con el mismo teléfono; teléfono y correo apuntando a contactos distintos; correo de dominio gratuito | 409 sin escrituras en los dos primeros; ninguna Company creada por gmail.com |
 | I18 | Arrays con comas dentro de un elemento | El JSON de `LeadIngestEvent.payload` reconstruye el array exacto |

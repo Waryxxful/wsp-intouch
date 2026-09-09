@@ -23,7 +23,13 @@
 - **No se despliega `apps/agent`** ni se habilitan Google/Microsoft/Slack, mailbox sync, enriquecimiento, Vercel Blob, AI Gateway ni tracking de sitios.
 - **Postgres no publica puerto.** `crm-app` y `crm-api` publican sólo en `127.0.0.1`.
 - **Datos de prueba**: nombres marcados `PRUEBA INTEGRACIÓN`, correos `@example.com`. Nunca se envía WhatsApp ni correo a direcciones de ejemplo.
-- **Tests del CRM**: son de integración real y escriben filas. Exigen `TEST_DATABASE_URL` distinta de `DATABASE_URL`, con nombre terminado en `_test`.
+- **Tests del CRM**: son de integración real y escriben filas. **Nunca se corren en el contenedor de la API de producción**: van en un servicio `tools` aparte, con su propia BD y un usuario de privilegio mínimo que **no tiene permisos sobre la BD de la app**. Un nombre terminado en `_test` no es aislamiento; el aislamiento es de credenciales.
+- **Ninguna garantía de PostgreSQL se afirma con SQLite.** Locks, restricciones únicas, transacciones y carreras se prueban contra Postgres real. SQLite sirve para los tests del bot, que son de otra naturaleza.
+- **Un archivo Compose autónomo, siempre invocado con `-f`.** No se usa un `override` para "quitar" cosas del compose de upstream: `ports: []` **no elimina el puerto heredado** — verificado con `docker compose config`, la lista se conserva y Postgres queda publicado.
+- **Credenciales propias de Postgres.** Jamás `postgres:postgres`, que son las de desarrollo de upstream.
+- **Ninguna migración corre en el arranque de la API.** Van en un paso de release explícito, revisado y coordinado.
+- **Ninguna credencial se imprime.** Ni en terminal, ni en argumentos, ni en commits, ni en informes. Se muestra id o huella no reutilizable.
+- **Limpieza de datos de prueba por ids propios**, nunca por prefijo de teléfono o de nombre: un `startsWith` puede borrar datos reales que casualmente coinciden.
 - **`bun` no está en el host** (sólo Node v22.23.2). Todo comando `bun` corre dentro de un contenedor.
 - **Criterio de un test que no rompe el repo**: `git status` limpio DESPUÉS de correr la suite.
 
@@ -32,32 +38,36 @@
 ### Task 1: CRM vendored, Postgres y build reproducible
 
 **Files:**
-- Create: `/home/admincrm/compai-crm/` (clon de `https://github.com/trycompai/crm.git`, tag/commit de v1.15.3)
-- Create: `/home/admincrm/compai-crm/docker-compose.override.yml`
+- Create: `/home/admincrm/compai-crm/` (clon de `https://github.com/trycompai/crm.git`, **en el tag `v1.15.3`**)
+- Create: `/home/admincrm/compai-crm/docker-compose.crm.yml` (**autónomo**, no un override)
 - Create: `/home/admincrm/compai-crm/Dockerfile.api`
 - Create: `/home/admincrm/compai-crm/Dockerfile.app`
+- Create: `/home/admincrm/compai-crm/Dockerfile.tools`
+- Create: `/home/admincrm/compai-crm/.dockerignore`
 - Create: `/home/admincrm/compai-crm/.env`
 - Create: `/home/admincrm/compai-crm/RUNBOOK.md`
 
 **Interfaces:**
 - Produces: contenedores `crm-postgres`, `crm-api` (interno 3001, publicado `127.0.0.1:3006`), `crm-app` (interno 3000, publicado `127.0.0.1:3005`); red externa `crm_ingest`; `GET /api/health` respondiendo 200.
 
-- [ ] **Step 1: Clonar y fijar la versión**
+- [ ] **Step 1: Clonar y fijar la versión en el TAG**
+
+Clonar la rama `release` **no fija la versión**: la rama se mueve, y un clon
+posterior traería otro commit. El tag `v1.15.3` existe (verificado en la API de
+GitHub), así que se fija ahí.
 
 ```bash
 cd /home/admincrm
 git clone https://github.com/trycompai/crm.git compai-crm
 cd compai-crm
 git remote rename origin upstream
-git log --oneline -1                    # anotar el commit exacto en RUNBOOK.md
-git checkout -b local/integracion-intouch
+git checkout -b local/integracion-intouch v1.15.3
+git rev-parse HEAD                      # anotar el SHA exacto en RUNBOOK.md
+grep '"version"' package.json           # espera: "1.15.3"
 ```
 
-Verificar que la versión es la esperada:
-
-```bash
-grep '"version"' package.json          # espera: "1.15.3"
-```
+Anotar en `RUNBOOK.md` el SHA, no sólo el número de versión: es lo único que
+identifica sin ambigüedad qué se desplegó.
 
 - [ ] **Step 2: Crear la red compartida con el bot**
 
@@ -135,16 +145,42 @@ EXPOSE 3000
 CMD ["sh", "-c", "cd apps/app && bun run start"]
 ```
 
-- [ ] **Step 5: Escribir `docker-compose.override.yml`**
+- [ ] **Step 5: Escribir `docker-compose.crm.yml` (autónomo)**
 
-El `docker-compose.yml` de upstream sólo levanta Postgres y se deja intacto; esto lo extiende.
+**NO se usa un override.** El compose de upstream publica `5432:5432`, y un
+`ports: []` en un override **no lo quita** — verificado:
+
+```bash
+docker compose config | grep -A3 'ports:'   # el 5432 heredado sigue ahí
+```
+
+Compose combina las listas en vez de reemplazarlas, así que Postgres quedaría
+publicado al host mientras el plan afirma lo contrario. La solución es un
+archivo propio y completo, invocado **siempre** con `-f`, que no herede nada:
 
 ```yaml
+# docker-compose.crm.yml — autónomo. Usar SIEMPRE con -f:
+#   docker compose -f docker-compose.crm.yml <cmd>
+# Nunca `docker compose` a secas en este directorio: tomaría el
+# docker-compose.yml de upstream, que publica Postgres al host.
 services:
   postgres:
-    # Upstream publica 5432 al host. Acá NO: nada de exponer Postgres
-    # (spec §1, prompt §E02). Se sobreescribe con una lista vacía.
-    ports: []
+    image: postgres:17-alpine
+    container_name: crm-postgres
+    restart: unless-stopped
+    environment:
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_DB: ${POSTGRES_DB}
+    # Sin `ports`: no se publica nada al host (prompt §E02).
+    volumes:
+      - crm-postgres:/var/lib/postgresql/data
+      - ./tools/init-db.sql:/docker-entrypoint-initdb.d/10-init-db.sql:ro
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
+      interval: 3s
+      timeout: 5s
+      retries: 20
     networks: [crm_interna]
 
   api:
@@ -160,8 +196,9 @@ services:
     depends_on:
       postgres: {condition: service_healthy}
     networks: [crm_interna, crm_ingest]
-    command: >
-      sh -c "bun run db:deploy && bun apps/api/src/main.ts"
+    # SIN migraciones en el arranque: van en un paso de release explícito
+    # (Step 11). Migrar en cada arranque hace que un restart automático aplique
+    # DDL sin que nadie lo haya revisado ni coordinado.
 
   app:
     build:
@@ -177,21 +214,113 @@ services:
     depends_on: [api]
     networks: [crm_interna]
 
+  # Imagen separada para migraciones, semillas y tests. NO es la imagen de
+  # despliegue: trae herramientas que no tienen por qué existir en producción,
+  # y su usuario de BD es otro.
+  #
+  # Los tests del CRM son de integración real y escriben filas. Correrlos en
+  # el contenedor de la API sería correrlos con la credencial y la
+  # DATABASE_URL de producción -- un fallo del setup y escriben en la BD real.
+  tools:
+    build:
+      context: .
+      dockerfile: Dockerfile.tools
+    container_name: crm-tools
+    env_file: [.env.tools]
+    depends_on:
+      postgres: {condition: service_healthy}
+    networks: [crm_interna]
+    profiles: [tools]        # no arranca solo; se invoca con `run --rm tools`
+
 networks:
   crm_interna:
     driver: bridge
   crm_ingest:
     external: true
+
+volumes:
+  crm-postgres:
 ```
 
-- [ ] **Step 6: Escribir `.env`**
+- [ ] **Step 6: Aislar la BD de pruebas por credenciales, no por nombre**
+
+`tools/init-db.sql`, que Postgres corre en la primera inicialización:
+
+```sql
+-- Tres roles con propósitos distintos. El aislamiento de las pruebas es de
+-- PERMISOS y no de nombre: un runner mal configurado que apunte a la BD de la
+-- app tiene que recibir "permission denied", no escribir.
+CREATE DATABASE crm_test;
+
+CREATE ROLE crm_app  LOGIN PASSWORD :'app_password';
+CREATE ROLE crm_test LOGIN PASSWORD :'test_password';
+
+-- La app manda en su BD y no puede ni conectarse a la de pruebas.
+GRANT ALL PRIVILEGES ON DATABASE crm TO crm_app;
+REVOKE CONNECT ON DATABASE crm_test FROM PUBLIC;
+GRANT CONNECT ON DATABASE crm_test TO crm_test;
+
+-- Y el rol de pruebas NO puede conectarse a la BD de la app. Es la línea que
+-- convierte "ojalá el runner esté bien configurado" en una garantía.
+REVOKE CONNECT ON DATABASE crm FROM crm_test;
+```
+
+Verificarlo, porque es la defensa que importa:
+
+```bash
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml exec postgres \
+  psql "postgresql://crm_test:$TEST_PASSWORD@localhost:5432/crm" -c 'select 1'
+```
+
+Expected: `FATAL: permission denied for database "crm"`. Si conecta, las
+pruebas pueden escribir en producción y **no se sigue** con las tareas
+siguientes.
+
+- [ ] **Step 7: Escribir `.dockerignore`**
+
+Sin esto, el `COPY . .` de los Dockerfiles mete `.env`, `.git` y volcados de BD
+en la imagen.
+
+```
+.git
+.env
+.env.*
+*.dump
+*.sql.gz
+node_modules
+**/node_modules
+**/.next
+**/dist
+docs/
+```
+
+Comprobar que el secreto no viajó:
+
+```bash
+docker run --rm --entrypoint sh crm-api -c 'ls -a /app | grep -E "^\.env|^\.git" || echo "OK: sin secretos en la imagen"'
+```
+
+- [ ] **Step 8: Escribir `.env`**
 
 Sólo lo que el código de esta versión usa. Sin `GEMINI_API_KEY`: no aparece en v1.15.3.
 
+Credenciales **propias**: `postgres:postgres` son las de desarrollo de upstream
+y no se reutilizan.
+
 ```bash
-cat > /home/admincrm/compai-crm/.env <<'EOF'
-DATABASE_URL="postgresql://postgres:postgres@postgres:5432/crm?schema=public"
-TEST_DATABASE_URL="postgresql://postgres:postgres@postgres:5432/crm_test?schema=public"
+cd /home/admincrm/compai-crm
+POSTGRES_PASSWORD=$(openssl rand -hex 24)
+APP_PASSWORD=$(openssl rand -hex 24)
+TEST_PASSWORD=$(openssl rand -hex 24)
+
+cat > .env <<EOF
+POSTGRES_USER=crm_owner
+POSTGRES_PASSWORD=$POSTGRES_PASSWORD
+POSTGRES_DB=crm
+
+# La app usa el rol crm_app, que NO puede conectarse a la BD de pruebas.
+DATABASE_URL="postgresql://crm_app:$APP_PASSWORD@postgres:5432/crm?schema=public"
 
 # openssl rand -base64 32
 BETTER_AUTH_SECRET=""
@@ -209,18 +338,33 @@ CRM_TELEMETRY_DISABLED="1"
 INTOUCH_INGEST_USER_ID=""
 INTOUCH_LEAD_OWNER_EMAIL=""
 EOF
-openssl rand -base64 32   # pegar en BETTER_AUTH_SECRET
+
+# Archivo aparte para las herramientas y los tests: su rol de BD es otro, y
+# NO lleva BETTER_AUTH_SECRET ni la URL de la app.
+cat > .env.tools <<EOF
+DATABASE_URL="postgresql://crm_test:$TEST_PASSWORD@postgres:5432/crm_test?schema=public"
+TEST_DATABASE_URL="postgresql://crm_test:$TEST_PASSWORD@postgres:5432/crm_test?schema=public"
+CRM_TELEMETRY_DISABLED="1"
+EOF
+
+chmod 600 .env .env.tools
+sed -i "s|^BETTER_AUTH_SECRET=.*|BETTER_AUTH_SECRET=\"$(openssl rand -base64 32)\"|" .env
 ```
 
-- [ ] **Step 7: Levantar y verificar que la API responde**
+**Registrar en `RUNBOOK.md`, por variable, si se consume al compilar o al
+ejecutar.** `APP_URL` y `API_URL` quedan horneadas en el bundle del frontend
+(§1.1): cambiarlas exige rebuild, no reinicio.
+
+- [ ] **Step 9: Levantar y verificar que la API responde**
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose up -d --build postgres api
-docker compose logs -f api | head -40
+docker compose -f docker-compose.crm.yml up -d --build postgres api
+docker compose -f docker-compose.crm.yml logs -f api | head -40
 ```
 
-Expected: `API listening on http://localhost:3001` y las migraciones aplicadas por `db:deploy`.
+Expected: `API listening on http://localhost:3001`. **Todavía sin migraciones**:
+las aplica el paso de release del Step 9, no el arranque.
 
 ```bash
 curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3006/api/health
@@ -228,35 +372,94 @@ curl -s -o /dev/null -w '%{http_code}\n' http://127.0.0.1:3006/api/health
 
 Expected: `200`.
 
-- [ ] **Step 8: Verificar que Postgres NO está expuesto**
+- [ ] **Step 10: Verificar que Postgres NO está expuesto**
 
 ```bash
 ss -ltn | grep 5432 || echo "OK: 5432 no escucha en el host"
 ```
 
-Expected: la línea `OK:`. Si aparece un listener, el `ports: []` del override no se aplicó.
+Expected: la línea `OK:`. Si aparece un listener, se está usando el compose de
+upstream: revisar que TODOS los comandos lleven `-f docker-compose.crm.yml`.
 
-- [ ] **Step 9: Confirmar que las migraciones quedaron limpias**
+- [ ] **Step 11: Aplicar las migraciones como paso de release explícito**
 
-```bash
-docker compose exec api bunx --bun prisma migrate status --schema packages/db/prisma/schema.prisma
-```
-
-Expected: `Database schema is up to date!` y ninguna migración pendiente ni deriva.
-
-- [ ] **Step 10: Commit**
+Con la imagen de herramientas, no con la de la API, y como un comando que una
+persona decide correr:
 
 ```bash
 cd /home/admincrm/compai-crm
-git add Dockerfile.api Dockerfile.app docker-compose.override.yml RUNBOOK.md
-git commit -m "infra: build y compose para desplegar el CRM en GranCRM-QA
-
-Upstream no trae Dockerfile y su compose sólo levanta Postgres. Postgres
-deja de publicar puerto y los dos servicios publican sólo en loopback: el
-gateway corre en network_mode host y llega por 127.0.0.1."
+docker compose -f docker-compose.crm.yml run --rm \
+  -e DATABASE_URL="postgresql://crm_owner:$POSTGRES_PASSWORD@postgres:5432/crm?schema=public" \
+  tools bunx --bun prisma migrate deploy --schema packages/db/prisma/schema.prisma
 ```
 
-`.env` no se commitea (lo cubre `.gitignore` de upstream; verificar con `git status`).
+`migrate deploy` y **nunca** `db push`, `migrate reset` ni
+`--accept-data-loss`. Va con el rol `crm_owner` porque `crm_app` no tiene por
+qué poder cambiar el esquema en caliente.
+
+- [ ] **Step 12: Comprobar el esquema real, no sólo el historial**
+
+```bash
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bunx --bun prisma migrate status --schema packages/db/prisma/schema.prisma
+```
+
+Expected: `Database schema is up to date!`.
+
+**Pero `migrate status` compara historiales de migración, no certifica que el
+esquema físico coincida.** Para eso, un diff real contra el esquema declarado:
+
+```bash
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bunx --bun prisma migrate diff \
+    --from-schema-datasource packages/db/prisma/schema.prisma \
+    --to-schema-datamodel packages/db/prisma/schema.prisma \
+    --exit-code
+```
+
+Expected: exit code `0` y ninguna diferencia. Un exit `2` significa deriva y
+hay que resolverla antes de seguir.
+
+- [ ] **Step 13: Verificar que la imagen ejecuta el build y no el fuente**
+
+El `CMD` de `Dockerfile.api` corre `bun apps/api/src/main.ts`, o sea el fuente
+bajo el runtime de Bun. Eso **no** es necesariamente equivalente al build de
+Nest que el repo define en su script `build`, sobre todo con decoradores y
+`reflect-metadata`. Comprobarlo antes de darlo por bueno:
+
+```bash
+docker compose -f docker-compose.crm.yml exec api sh -c 'ls dist/ 2>/dev/null || echo "sin dist: corre el fuente"'
+curl -s http://127.0.0.1:3006/api/health
+```
+
+Si la API responde y los tests de la Task 9 pasan por HTTP, correr el fuente es
+aceptable y queda anotado en `RUNBOOK.md` como decisión. Si algo falla con
+metadatos de decoradores, cambiar el `CMD` a `bun run build` + `bun dist/main.js`
+y volver a verificar.
+
+- [ ] **Step 14: Commit**
+
+```bash
+cd /home/admincrm/compai-crm
+git add Dockerfile.api Dockerfile.app Dockerfile.tools .dockerignore \
+        docker-compose.crm.yml tools/init-db.sql RUNBOOK.md
+git commit -m "infra: build y compose autonomo para desplegar el CRM en GranCRM-QA
+
+Upstream no trae Dockerfile y su compose solo levanta Postgres, publicandolo
+al host. Un override con ports: [] NO quita ese puerto -- compose combina las
+listas -- asi que este es un archivo autonomo que se invoca siempre con -f.
+
+Credenciales propias y tres roles: crm_owner migra, crm_app corre la app y
+crm_test corre las pruebas, sin permiso para conectarse a la BD de la app.
+Las migraciones NO van en el arranque: paso de release explicito."
+```
+
+Verificar que ningún secreto entró al commit:
+
+```bash
+git show --stat HEAD
+git diff HEAD~1 HEAD | grep -iE "password|secret|crm_" | grep -v "crm_app\|crm_test\|crm_owner\|crm-" || echo "OK: sin secretos"
+```
 
 ---
 
@@ -270,7 +473,14 @@ gateway corre en network_mode host y llega por 127.0.0.1."
 - Consumes: contenedores de la Task 1.
 - Produces: un `User` de servicio con `email` `bot-intouch@in-touchcrm.cl`; una API key `crm_…`; el valor de `INTOUCH_INGEST_USER_ID` (cuid del User).
 
-**Por qué un usuario de servicio y no la key de una persona:** verificado en `packages/auth/src/auth.ts` — las keys se crean **sin `permissions`** y `enableSessionForAppKeys: true` las vuelve equivalentes a su usuario dueño. Una key no tiene alcance propio; el alcance lo pone la Task 9 comparando contra este id.
+**Por qué un usuario de servicio y no la key de una persona:** verificado en `packages/auth/src/auth.ts` — las keys se crean **sin `permissions`** y `enableSessionForAPIKeys: true` las vuelve equivalentes a su usuario dueño. Una key no tiene alcance propio; el alcance lo pone la Task 9 comparando contra este id.
+
+**Y por eso no basta con chequearla en un endpoint.** Una key de un usuario con
+acceso total, verificada sólo en la ruta de ingesta, sigue siendo una
+credencial de acceso total: sirve para leer contactos, exportar y tocar
+ajustes por cualquier otra ruta. El Step 4 lo comprueba, y si resulta que la
+key abre el resto de la API, **el diseño de la credencial cambia** (Step 4) y
+eso se decide antes de seguir, no después.
 
 - [ ] **Step 1: Escribir el script de semilla**
 
@@ -300,49 +510,128 @@ const user = await db.user.upsert({
 	select: { id: true },
 });
 
-const created = await auth.api.createApiKey({
-	body: {
-		name: "wsp_intouch — ingesta de leads",
-		userId: user.id,
-		expiresIn: 365 * 24 * 60 * 60,
-	},
+// Idempotente: si ya hay una key vigente de esta integración, NO se emite
+// otra. Emitir una key nueva en cada corrida de la semilla deja credenciales
+// válidas huérfanas que nadie revoca.
+const NOMBRE_KEY = "wsp_intouch — ingesta de leads";
+const existente = await db.apikey.findFirst({
+	where: { referenceId: user.id, name: NOMBRE_KEY, enabled: true },
+	select: { id: true, start: true, expiresAt: true },
 });
 
+if (existente) {
+	console.log(`INTOUCH_INGEST_USER_ID=${user.id}`);
+	console.log(
+		`Ya existe una key vigente (id ${existente.id}, prefijo ${existente.start}, ` +
+			`vence ${existente.expiresAt?.toISOString() ?? "nunca"}). ` +
+			"No se emite otra. Para rotarla: revocala explícitamente y volvé a correr esto.",
+	);
+	process.exit(0);
+}
+
+const created = await auth.api.createApiKey({
+	body: { name: NOMBRE_KEY, userId: user.id, expiresIn: 365 * 24 * 60 * 60 },
+});
+
+// La key NO se imprime: se escribe a un archivo con permisos 600 que el
+// operador mueve a la configuración del bot y borra. En pantalla va sólo la
+// huella, que sirve para identificarla y no para usarla.
+const destino = "/tmp/lead_sink_token";
+await Bun.write(destino, created.key);
+await Bun.$`chmod 600 ${destino}`;
+
+const huella = new Bun.CryptoHasher("sha256").update(created.key).digest("hex");
 console.log(`INTOUCH_INGEST_USER_ID=${user.id}`);
-console.log(`LEAD_SINK_TOKEN=${created.key}`);
-console.log("Guardá la key ahora: no se puede volver a leer.");
+console.log(`Key escrita en ${destino} (permisos 600). Moverla y borrar el archivo.`);
+console.log(`Huella sha256: ${huella.slice(0, 16)}…  prefijo: ${created.start}`);
 ```
 
 - [ ] **Step 2: Correrlo**
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun tools/seed-ingest-principal.ts
+docker compose -f docker-compose.crm.yml run --rm \
+  -e DATABASE_URL="postgresql://crm_owner:$POSTGRES_PASSWORD@postgres:5432/crm?schema=public" \
+  tools bun tools/seed-ingest-principal.ts
 ```
 
-Expected: las dos líneas con valores. **Si `createApiKey` rechaza el `userId`**, el supuesto del API de servidor es falso: parar acá y reportarlo — es una decisión de diseño, no algo que se parchee inventando el hash de la key a mano.
+Expected: el id del usuario, la ruta del archivo y la huella. **La key no
+aparece en pantalla.**
+
+**Si `createApiKey` rechaza el `userId`**, el supuesto del API de servidor es
+falso: parar acá y reportarlo — es una decisión de diseño, no algo que se
+parchee inventando el hash de la key a mano.
 
 - [ ] **Step 3: Verificar que la key autentica de verdad**
 
-No alcanza con que el script la haya impreso. Se comprueba contra un endpoint que ya existe:
+No alcanza con que el script la haya emitido.
 
 ```bash
-KEY='<la key del paso 2>'
+KEY=$(cat /tmp/lead_sink_token)
 curl -s -o /dev/null -w 'con key: %{http_code}\n' -H "x-api-key: $KEY" http://127.0.0.1:3006/api/users.me
 curl -s -o /dev/null -w 'sin key: %{http_code}\n' http://127.0.0.1:3006/api/users.me
 ```
 
 Expected: `con key: 200` y `sin key: 401`. Si la primera da 401, la key no está autenticando y las Tasks 9 y 14 no se pueden validar.
 
-- [ ] **Step 4: Guardar el id en `.env` y reiniciar la API**
+- [ ] **Step 4: Medir el alcance REAL de la key — decide el diseño**
+
+Éste es el paso que define si la credencial sirve. Se prueba contra las rutas
+que el bot **no** tiene por qué poder usar:
+
+```bash
+KEY=$(cat /tmp/lead_sink_token)
+for ruta in api/contacts.list api/companies.list api/users.list api/settings.get api/deals.list; do
+  printf '%-24s %s\n' "$ruta" \
+    "$(curl -s -o /dev/null -w '%{http_code}' -H "x-api-key: $KEY" http://127.0.0.1:3006/$ruta)"
+done
+```
+
+(Los nombres exactos de procedimiento se leen del router real; lo que importa
+es probar lectura de contactos, empresas, usuarios, ajustes y oportunidades.)
+
+**Interpretación, y es una bifurcación de diseño:**
+
+- Si todas devuelven **401/403**: la key ya está acotada. Se sigue con la Task 3.
+- Si alguna devuelve **200**: la key es una credencial de acceso total y
+  chequearla en un endpoint no la limita. Hay que elegir, **documentar la
+  elección antes de implementarla**, y recién entonces seguir:
+  1. Sacar `enableSessionForAPIKeys` para esta key en `packages/auth`, o
+     restringir por `permissions` si la versión instalada lo soporta —
+     comprobando que no rompe otros usos de keys en el CRM.
+  2. O montar una credencial de integración **fuera** de Better Auth: un
+     secreto propio verificado por un guard de Nest sólo en `/api/ingest`, con
+     su propia rotación. Es menos reuso pero alcance exacto.
+
+Anotar el resultado y la decisión en `RUNBOOK.md`. La Task 9 prueba el
+resultado final por HTTP (caso R06).
+
+- [ ] **Step 5: Definir expiración, rotación y revocación**
+
+La key vence en 365 días. Anotar en `RUNBOOK.md`: cómo se revoca, cómo se
+emite el relevo y qué pasa con los leads pendientes durante el cambio (no se
+pierden: quedan sin sellar y el barrido de la Task 12 los reintenta con el
+mismo `evento_id`). Probar el rechazo de una key revocada:
+
+```bash
+# Revocar por id desde la UI del CRM o el API, y reintentar:
+curl -s -o /dev/null -w 'revocada: %{http_code}\n' -H "x-api-key: $KEY" \
+  http://127.0.0.1:3006/api/users.me
+```
+
+Expected: `401`.
+
+- [ ] **Step 6: Guardar el id en `.env`, mover la key y reiniciar**
 
 ```bash
 cd /home/admincrm/compai-crm
 sed -i 's|^INTOUCH_INGEST_USER_ID=.*|INTOUCH_INGEST_USER_ID="<el id del paso 2>"|' .env
-docker compose up -d api
+docker compose -f docker-compose.crm.yml up -d api
+# La key va al .env.docker del bot (Task 14). Después:
+shred -u /tmp/lead_sink_token 2>/dev/null || rm -f /tmp/lead_sink_token
 ```
 
-- [ ] **Step 5: Commit**
+- [ ] **Step 7: Commit**
 
 ```bash
 git add tools/seed-ingest-principal.ts
@@ -436,7 +725,7 @@ describe("LeadIngestEvent", () => {
 ```bash
 cd /home/admincrm/compai-crm
 docker compose exec api bun run db:test
-docker compose exec api bun test apps/api/test/ingest-event.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-event.spec.ts
 ```
 
 Expected: FAIL — `db.leadIngestEvent` no existe (`Cannot read properties of undefined`).
@@ -499,7 +788,7 @@ cat packages/db/prisma/migrations/*add_lead_ingest_event/migration.sql
 
 ```bash
 docker compose exec api bun run db:test
-docker compose exec api bun test apps/api/test/ingest-event.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-event.spec.ts
 ```
 
 Expected: PASS, los 4.
@@ -593,7 +882,7 @@ describe("campos dinámicos de InTouch", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-fields.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-fields.spec.ts
 ```
 
 Expected: FAIL — no existe `../src/ingest/ingest-fields`.
@@ -807,7 +1096,7 @@ console.log(`Campos de InTouch sembrados. Nuevos: ${creados}.`);
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-fields.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-fields.spec.ts
 ```
 
 Expected: PASS, los 4.
@@ -932,7 +1221,7 @@ describe("contrato de entrada del lead", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-contract.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-contract.spec.ts
 ```
 
 Expected: FAIL — no existe el módulo.
@@ -1021,7 +1310,7 @@ export type LeadInTouchPayload = z.infer<typeof leadInTouchSchema>;
 - [ ] **Step 4: Correr los tests**
 
 ```bash
-docker compose exec api bun test apps/api/test/ingest-contract.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-contract.spec.ts
 ```
 
 Expected: PASS, los 10.
@@ -1048,15 +1337,29 @@ booleanos aceptan null/ausente porque 'nadie pregunto' no es 'dijo que no'."
 
 **Interfaces:**
 - Consumes: `LeadInTouchPayload` (Task 5); `domainFromEmail` de `../companies/domain`; `splitName` de `../mailbox/participants`; `normalizeEmail` de `../crm/values`.
-- Produces: `IngestIdentityService` con `resolver(tx, payload): Promise<ResolucionIdentidad>`, y el tipo `ResolucionIdentidad = { ok: true; companyId: string | null; contactId: string } | { ok: false; motivo: string }`.
+- Produces: `IngestIdentityService` con `resolver(tx, payload): Promise<Resolucion>` — **sin efectos**, y `aplicarIdentidad(tx, payload, plan): Promise<{ companyId: string | null; contactId: string }>` — que escribe. Tipos: `Resolucion = { ok: true; plan: PlanIdentidad } | { ok: false; motivo: string; codigo: string }` y `PlanIdentidad = { empresa: {accion: "usar"; id: string} | {accion: "crear"; nombre: string; dominio: string | null} | {accion: "ninguna"}; contacto: {accion: "usar"; id: string} | {accion: "crear"} }`.
 
 **El punto donde una fusión equivocada cuesta datos de un tercero. Ninguna regla adivina.**
+
+**Y una corrección de fondo sobre el diseño anterior: la resolución NO escribe.**
+Antes creaba la Company y *después* podía devolver conflicto de contacto — pero
+la transacción seguía y commiteaba, así que quedaba una empresa creada por un
+evento que se rechazó. Efectos parciales, exactamente lo que el plan decía
+evitar. Ahora son dos fases: `resolver` decide y devuelve un **plan** sin tocar
+la base, y `aplicarIdentidad` lo ejecuta **sólo** si el plan completo es
+aceptable.
+
+**Y otra: no se fusiona por nombre, tampoco entre empresas sin dominio.** El
+código anterior buscaba por `name` entre las de `domain: null` y decía
+comprobar el origen, pero no lo comprobaba: el campo `origen` es un
+`FieldValue` y la consulta no lo miraba. Acá se busca por el **vínculo de
+origen**, que es lo único que prueba que esa fila la creó esta integración.
 
 - [ ] **Step 1: Escribir el test que falla**
 
 ```typescript
 // apps/api/test/ingest-identity.spec.ts
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { db } from "@crm/db";
 import { IngestIdentityService } from "../src/ingest/ingest-identity.service";
 
@@ -1079,61 +1382,136 @@ function payload(over: Record<string, unknown> = {}) {
 }
 
 describe("resolución de identidad", () => {
-	beforeEach(async () => {
-		await db.contact.deleteMany({ where: { phone: { startsWith: "569000009" } } });
-		await db.company.deleteMany({ where: { name: { startsWith: "PRUEBA INTEGRACIÓN" } } });
+	// Cada corrida usa su propio sufijo, y limpia SÓLO lo que ella creó. Un
+	// `deleteMany` por prefijo de teléfono o de nombre puede borrar filas
+	// reales que casualmente coincidan -- y acá esas filas son de un cliente.
+	const creados: { contactos: string[]; empresas: string[] } = { contactos: [], empresas: [] };
+
+	afterEach(async () => {
+		for (const id of creados.contactos) {
+			await db.contact.delete({ where: { id } }).catch(() => {});
+		}
+		for (const id of creados.empresas) {
+			await db.company.delete({ where: { id } }).catch(() => {});
+		}
+		creados.contactos.length = 0;
+		creados.empresas.length = 0;
 	});
 
-	test("un correo corporativo identifica la empresa por dominio", async () => {
+	/// Registra lo que un test crea, para que `afterEach` lo borre por id.
+	async function anotar(r: { companyId: string | null; contactId: string }) {
+		creados.contactos.push(r.contactId);
+		if (r.companyId) creados.empresas.push(r.companyId);
+		return r;
+	}
+
+	test("resolver NO escribe nada, ni cuando decide crear", async () => {
+		// La garantía que hace imposible el efecto parcial: la fase de decisión
+		// no toca la base, así que un conflicto descubierto al final no puede
+		// dejar una empresa creada por un evento rechazado.
+		const antesEmpresas = await db.company.count();
+		const antesContactos = await db.contact.count();
 		const r = await db.$transaction((tx) =>
 			servicio.resolver(tx, payload({ correo: "ana@acme-prueba.cl" })),
 		);
 		expect(r.ok).toBe(true);
-		const empresa = await db.company.findUniqueOrThrow({
-			where: { id: (r as { companyId: string }).companyId },
-		});
-		expect(empresa.domain).toBe("acme-prueba.cl");
+		expect(await db.company.count()).toBe(antesEmpresas);
+		expect(await db.contact.count()).toBe(antesContactos);
 	});
 
-	test("un correo de dominio gratuito NO crea empresa por dominio", async () => {
+	test("un correo corporativo planifica la empresa por dominio", async () => {
+		const r = await db.$transaction((tx) =>
+			servicio.resolver(tx, payload({ correo: "ana@acme-prueba.cl" })),
+		);
+		expect(r.ok).toBe(true);
+		const plan = (r as { plan: { empresa: Record<string, unknown> } }).plan;
+		expect(plan.empresa).toMatchObject({
+			accion: "crear", dominio: "acme-prueba.cl",
+		});
+	});
+
+	test("un conflicto de contacto NO deja empresa creada", async () => {
+		// El caso concreto del defecto: dos contactos con el mismo teléfono, y
+		// una empresa que el plan habría creado.
+		await db.contact.create({ data: { firstName: "A", phone: "56900000905" } });
+		await db.contact.create({ data: { firstName: "B", phone: "56900000905" } });
+		const antes = await db.company.count();
+		const r = await db.$transaction(async (tx) => {
+			const resuelta = await servicio.resolver(tx, payload({
+				telefono: "56900000905", correo: "ana@empresa-nueva-prueba.cl",
+			}));
+			if (!resuelta.ok) return resuelta;
+			await servicio.aplicarIdentidad(tx, payload(), resuelta.plan);
+			return resuelta;
+		});
+		expect(r.ok).toBe(false);
+		expect(await db.company.count()).toBe(antes);
+	});
+
+	test("un correo de dominio gratuito NO identifica empresa por dominio", async () => {
 		// domainFromEmail de upstream devuelve null para gmail y 20 más. Sin
 		// esto, todos los contactos con gmail caerían en una misma "empresa".
 		const r = await db.$transaction((tx) =>
 			servicio.resolver(tx, payload({ correo: "ana@gmail.com" })),
 		);
 		expect(r.ok).toBe(true);
-		const empresa = await db.company.findUniqueOrThrow({
-			where: { id: (r as { companyId: string }).companyId },
-		});
-		expect(empresa.domain).toBeNull();
+		expect((r as { plan: { empresa: { dominio: string | null } } }).plan.empresa.dominio)
+			.toBeNull();
 	});
 
 	test("sin dominio NO se fusiona con una empresa que sí tiene dominio", async () => {
-		// El caso que importa: un "Acme" que dijo el contacto por WhatsApp no
-		// puede meterse dentro del Acme real que cargó una persona.
+		// Un "Acme" que dijo el contacto por WhatsApp no puede meterse dentro
+		// del Acme real que cargó una persona.
 		const real = await db.company.create({
 			data: { name: "PRUEBA INTEGRACIÓN SpA", domain: "acme-real-prueba.cl" },
 		});
 		const r = await db.$transaction((tx) => servicio.resolver(tx, payload()));
-		expect(r.ok).toBe(true);
-		expect((r as { companyId: string }).companyId).not.toBe(real.id);
+		expect((r as { plan: { empresa: { accion: string } } }).plan.empresa.accion)
+			.toBe("crear");
+		expect(JSON.stringify(r)).not.toContain(real.id);
 	});
 
-	test("sin dominio reusa la empresa que el mismo origen ya había creado", async () => {
-		const primera = await db.$transaction((tx) => servicio.resolver(tx, payload()));
-		const segunda = await db.$transaction((tx) =>
-			servicio.resolver(tx, payload({ telefono: "56900000901" })),
-		);
-		expect((primera as { companyId: string }).companyId)
-			.toBe((segunda as { companyId: string }).companyId);
+	test("sin dominio NO se fusiona por nombre, ni con otra sin dominio", async () => {
+		// La corrección del diseño anterior: buscaba por nombre entre las de
+		// domain=null diciendo que comprobaba el origen, y no lo comprobaba.
+		// Dos empresas homónimas sin dominio pueden ser dos empresas distintas.
+		await db.company.create({ data: { name: "PRUEBA INTEGRACIÓN SpA" } });
+		const r = await db.$transaction((tx) => servicio.resolver(tx, payload()));
+		expect((r as { plan: { empresa: { accion: string } } }).plan.empresa.accion)
+			.toBe("crear");
 	});
 
-	test("sin dominio y sin nombre de empresa no se crea ninguna", async () => {
+	test("reusa la empresa cuando hay VÍNCULO de origen, no por nombre", async () => {
+		// Lo único que prueba que esa fila la creó esta integración para este
+		// contacto es el vínculo, no que el nombre coincida.
+		const primera = await db.$transaction(async (tx) => {
+			const r = await servicio.resolver(tx, payload());
+			return servicio.aplicarIdentidad(tx, payload(), (r as { plan: never }).plan);
+		});
+		const segunda = await db.$transaction((tx) => servicio.resolver(tx, payload()));
+		expect((segunda as { plan: { empresa: { id: string } } }).plan.empresa)
+			.toMatchObject({ accion: "usar", id: primera.companyId });
+	});
+
+	test("sin dominio y sin nombre de empresa no se planifica ninguna", async () => {
 		const r = await db.$transaction((tx) =>
 			servicio.resolver(tx, payload({ empresa: "" })),
 		);
-		expect(r.ok).toBe(true);
-		expect((r as { companyId: string | null }).companyId).toBeNull();
+		expect((r as { plan: { empresa: { accion: string } } }).plan.empresa.accion)
+			.toBe("ninguna");
+	});
+
+	test("no se inventa website como si el sitio estuviera verificado", async () => {
+		const r = await db.$transaction(async (tx) => {
+			const resuelta = await servicio.resolver(tx, payload({
+				correo: "ana@sitio-no-verificado-prueba.cl",
+			}));
+			return servicio.aplicarIdentidad(tx, payload(), (resuelta as { plan: never }).plan);
+		});
+		const empresa = await db.company.findUniqueOrThrow({
+			where: { id: r.companyId! },
+		});
+		expect(empresa.website).toBeNull();
 	});
 
 	test("varios contactos con el mismo teléfono es conflicto, no una adivinanza", async () => {
@@ -1143,7 +1521,29 @@ describe("resolución de identidad", () => {
 			servicio.resolver(tx, payload({ telefono: "56900000902" })),
 		);
 		expect(r.ok).toBe(false);
-		expect((r as { motivo: string }).motivo).toContain("teléfono");
+		expect((r as { codigo: string }).codigo).toBe("telefono_ambiguo");
+	});
+
+	test("dos claves de contacto distintas que comparten teléfono no se fusionan", async () => {
+		// Carrera que un lock por clave de contacto NO cubre: son claves
+		// distintas, así que toman locks distintos y corren en paralelo.
+		const uno = payload({ clave_contacto: "b1".repeat(16), telefono: "56900000906" });
+		const dos = payload({ clave_contacto: "b2".repeat(16), telefono: "56900000906" });
+		const [ra, rb] = await Promise.all([
+			db.$transaction(async (tx) => {
+				const r = await servicio.resolver(tx, uno);
+				return r.ok ? servicio.aplicarIdentidad(tx, uno, r.plan) : r;
+			}),
+			db.$transaction(async (tx) => {
+				const r = await servicio.resolver(tx, dos);
+				return r.ok ? servicio.aplicarIdentidad(tx, dos, r.plan) : r;
+			}),
+		]);
+		// Resultado determinista: o comparten el contacto, o una de las dos es
+		// conflicto. Lo que NO puede pasar es dos contactos con el mismo
+		// teléfono creados por esta ingesta.
+		expect(await db.contact.count({ where: { phone: "56900000906" } })).toBe(1);
+		expect([ra, rb].filter((r) => "contactId" in r).length).toBeGreaterThanOrEqual(1);
 	});
 
 	test("teléfono y correo apuntando a contactos distintos es conflicto", async () => {
@@ -1158,7 +1558,7 @@ describe("resolución de identidad", () => {
 			})),
 		);
 		expect(r.ok).toBe(false);
-		expect((r as { motivo: string }).motivo).toContain("distintos");
+		expect((r as { codigo: string }).codigo).toBe("identidad_dividida");
 	});
 
 	test("un contacto hallado por correo NO pierde el teléfono que ya tenía", async () => {
@@ -1168,23 +1568,32 @@ describe("resolución de identidad", () => {
 				phone: "56911111111",
 			},
 		});
-		const r = await db.$transaction((tx) =>
-			servicio.resolver(tx, payload({
-				correo: "ana-fija-prueba@example.com", telefono: "56900000904",
-			})),
-		);
-		expect((r as { contactId: string }).contactId).toBe(existente.id);
+		const p = payload({
+			correo: "ana-fija-prueba@example.com", telefono: "56900000904",
+		});
+		const r = await db.$transaction(async (tx) => {
+			const resuelta = await servicio.resolver(tx, p);
+			// Un match sólo por correo con teléfono incompatible es CANDIDATO,
+			// no identidad: un correo escrito en una conversación no prueba
+			// posesión. Sin regla de identidad autorizada, es conflicto.
+			expect(resuelta.ok).toBe(false);
+			return resuelta;
+		});
+		expect((r as { codigo: string }).codigo).toBe("telefono_incompatible");
 		const despues = await db.contact.findUniqueOrThrow({ where: { id: existente.id } });
 		expect(despues.phone).toBe("56911111111");
+		expect(await db.fieldValue.count({ where: { contactId: existente.id } })).toBe(0);
 	});
 
-	test("un contacto nuevo se crea con el nombre partido", async () => {
-		const r = await db.$transaction((tx) => servicio.resolver(tx, payload()));
-		const contacto = await db.contact.findUniqueOrThrow({
-			where: { id: (r as { contactId: string }).contactId },
+	test("un contacto nuevo se crea con el nombre partido y sin inventar apellido", async () => {
+		const p = payload({ nombre_completo: "Ana" });
+		const r = await db.$transaction(async (tx) => {
+			const resuelta = await servicio.resolver(tx, p);
+			return servicio.aplicarIdentidad(tx, p, (resuelta as { plan: never }).plan);
 		});
-		expect(contacto.firstName).toBe("PRUEBA");
-		expect(contacto.lastName).toBe("INTEGRACIÓN Ana Pérez");
+		const contacto = await db.contact.findUniqueOrThrow({ where: { id: r.contactId } });
+		expect(contacto.firstName).toBe("Ana");
+		expect(contacto.lastName).toBeNull();
 	});
 });
 ```
@@ -1193,7 +1602,7 @@ describe("resolución de identidad", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-identity.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-identity.spec.ts
 ```
 
 Expected: FAIL — no existe el módulo.
@@ -1205,10 +1614,15 @@ Expected: FAIL — no existe el módulo.
 //
 // A qué Company y a qué Contact corresponde un lead del bot.
 //
-// Es el punto donde una fusión equivocada cuesta datos de un tercero, así que
-// ninguna regla adivina: los casos ambiguos devuelven conflicto y los resuelve
-// una persona. Un conflicto deja el lead pendiente y visible en el panel del
-// bot, que es lo que lo vuelve accionable en vez de perdido.
+// DOS FASES, y es la corrección más importante de este servicio: `resolver`
+// DECIDE sin escribir nada, y `aplicarIdentidad` ejecuta el plan. La versión
+// anterior creaba la Company y después podía devolver conflicto de contacto,
+// pero la transacción seguía y commiteaba: quedaba una empresa creada por un
+// evento que se rechazó. Con el plan separado, un conflicto descubierto al
+// final no puede dejar efectos.
+//
+// Ninguna regla adivina: los casos ambiguos devuelven conflicto con un código
+// estable y los resuelve una persona.
 import { type Prisma, RecordSource } from "@crm/db";
 import { Injectable, Logger } from "@nestjs/common";
 import { domainFromEmail } from "../companies/domain";
@@ -1216,82 +1630,107 @@ import { normalizeEmail } from "../crm/values";
 import { splitName } from "../mailbox/participants";
 import type { LeadInTouchPayload } from "./ingest.contracts";
 
-export type ResolucionIdentidad =
-	| { ok: true; companyId: string | null; contactId: string }
-	| { ok: false; motivo: string };
+export type PlanIdentidad = {
+	empresa:
+		| { accion: "usar"; id: string }
+		| { accion: "crear"; nombre: string; dominio: string | null }
+		| { accion: "ninguna" };
+	contacto: { accion: "usar"; id: string } | { accion: "crear" };
+};
+
+export type Resolucion =
+	| { ok: true; plan: PlanIdentidad }
+	| { ok: false; motivo: string; codigo: string };
 
 @Injectable()
 export class IngestIdentityService {
 	private readonly logger = new Logger(IngestIdentityService.name);
 
+	/// Decide a qué entidades corresponde el lead. **No escribe.**
 	async resolver(
 		tx: Prisma.TransactionClient,
 		payload: LeadInTouchPayload,
-	): Promise<ResolucionIdentidad> {
+	): Promise<Resolucion> {
 		const correo = normalizeEmail(payload.correo ?? "");
-		const companyId = await this.empresa(tx, payload, correo);
-		const contacto = await this.contacto(tx, payload, correo, companyId);
-		return contacto;
+
+		// 1. El vínculo de origen manda sobre cualquier heurística: si esta
+		// integración ya resolvió esta clave de contacto, se reusa. Es lo único
+		// que prueba procedencia -- que dos nombres de empresa coincidan, no.
+		const vinculo = await tx.leadIngestEvent.findFirst({
+			where: {
+				origin: payload.origen,
+				claveContacto: payload.clave_contacto,
+				contactId: { not: null },
+			},
+			orderBy: { revision: "desc" },
+			select: { contactId: true, companyId: true },
+		});
+
+		if (vinculo?.contactId) {
+			const contacto = await tx.contact.findUnique({
+				where: { id: vinculo.contactId },
+				select: { id: true, archivedAt: true },
+			});
+			// Si el contacto fue borrado o archivado, NO se recrea en silencio:
+			// alguien decidió sacarlo y un replay no puede resucitarlo.
+			if (!contacto || contacto.archivedAt) {
+				return {
+					ok: false,
+					codigo: "vinculo_roto",
+					motivo:
+						`El contacto ${vinculo.contactId} de este vínculo ya no está activo. ` +
+						"No se recrea automáticamente: hace falta decisión humana.",
+				};
+			}
+			const empresa = vinculo.companyId
+				? ({ accion: "usar", id: vinculo.companyId } as const)
+				: await this.planificarEmpresa(tx, payload, correo);
+			return { ok: true, plan: { empresa, contacto: { accion: "usar", id: contacto.id } } };
+		}
+
+		// 2. Origen nuevo: buscar candidatos, sin fusionar nada por su cuenta.
+		const contacto = await this.planificarContacto(tx, payload, correo);
+		if (!contacto.ok) return contacto;
+
+		const empresa = await this.planificarEmpresa(tx, payload, correo);
+		return { ok: true, plan: { empresa, contacto: contacto.valor } };
 	}
 
-	/// La empresa. Sólo el dominio corporativo es identificación fuerte.
-	private async empresa(
+	private async planificarEmpresa(
 		tx: Prisma.TransactionClient,
 		payload: LeadInTouchPayload,
 		correo: string | null,
-	): Promise<string | null> {
+	): Promise<PlanIdentidad["empresa"]> {
 		const dominio = correo ? domainFromEmail(correo) : null;
 
+		// Un dominio corporativo es la única identificación razonable, y aun así
+		// no prueba identidad legal: agencias y grupos comparten dominio. Se
+		// reusa una Company existente sólo por coincidencia exacta de dominio.
 		if (dominio) {
 			const existente = await tx.company.findFirst({
 				where: { domain: dominio, archivedAt: null },
 				select: { id: true },
 			});
-			if (existente) return existente.id;
-			const creada = await tx.company.create({
-				data: {
-					name: payload.empresa || dominio,
-					domain: dominio,
-					website: `https://${dominio}`,
-					industry: payload.industria || null,
-					subIndustry: payload.subtipo_automotriz || null,
-				},
-				select: { id: true },
-			});
-			return creada.id;
+			if (existente) return { accion: "usar", id: existente.id };
+			return { accion: "crear", nombre: payload.empresa || dominio, dominio };
 		}
 
-		// Sin dominio no se fusiona por nombre. Se busca sólo entre companies
-		// que TAMPOCO tengan dominio: así un "Acme" que dijo un contacto por
-		// WhatsApp nunca se mete dentro del Acme real que cargó una persona.
-		if (!payload.empresa) return null;
-
-		const porNombre = await tx.company.findFirst({
-			where: { name: payload.empresa, domain: null, archivedAt: null },
-			select: { id: true },
-		});
-		if (porNombre) return porNombre.id;
-
-		const creada = await tx.company.create({
-			data: {
-				name: payload.empresa,
-				industry: payload.industria || null,
-				subIndustry: payload.subtipo_automotriz || null,
-			},
-			select: { id: true },
-		});
-		return creada.id;
+		// SIN dominio NO se busca por nombre -- ni entre las que también tienen
+		// `domain: null`. Dos empresas homónimas pueden ser dos empresas, y el
+		// nombre lo declaró un contacto por WhatsApp. Si más adelante resulta
+		// que son la misma, la fusiona una persona; separarlas después es
+		// posible, desfusionar no.
+		if (!payload.empresa) return { accion: "ninguna" };
+		return { accion: "crear", nombre: payload.empresa, dominio: null };
 	}
 
-	/// El contacto. `Contact.phone` no tiene índice único (el único es
-	/// `@@unique([email]) where archivedAt: null`), así que la búsqueda por
-	/// teléfono puede devolver varias filas.
-	private async contacto(
+	private async planificarContacto(
 		tx: Prisma.TransactionClient,
 		payload: LeadInTouchPayload,
 		correo: string | null,
-		companyId: string | null,
-	): Promise<ResolucionIdentidad> {
+	): Promise<{ ok: true; valor: PlanIdentidad["contacto"] } | Resolucion> {
+		// `Contact.phone` no tiene índice único (el único es
+		// `@@unique([email]) where archivedAt: null`), así que puede haber varios.
 		const porTelefono = await tx.contact.findMany({
 			where: { phone: payload.telefono, archivedAt: null },
 			select: { id: true },
@@ -1300,9 +1739,10 @@ export class IngestIdentityService {
 		if (porTelefono.length > 1) {
 			return {
 				ok: false,
+				codigo: "telefono_ambiguo",
 				motivo:
 					`Hay más de un contacto con el teléfono ${payload.telefono}. ` +
-					"No se elige uno por adivinanza: lo resuelve una persona.",
+					"No se elige uno por adivinanza.",
 			};
 		}
 
@@ -1312,43 +1752,94 @@ export class IngestIdentityService {
 					select: { id: true, phone: true },
 				})
 			: null;
-
 		const unoPorTelefono = porTelefono[0] ?? null;
 
 		if (unoPorTelefono && porCorreo && unoPorTelefono.id !== porCorreo.id) {
 			return {
 				ok: false,
+				codigo: "identidad_dividida",
 				motivo:
-					"El teléfono y el correo apuntan a contactos distintos " +
-					`(${unoPorTelefono.id} y ${porCorreo.id}). Son dos personas o un ` +
-					"dato mal cargado; fusionarlos borraría a una de las dos.",
+					"El teléfono y el correo apuntan a contactos distintos. Son dos " +
+					"personas o un dato mal cargado; fusionarlos borraría a una.",
 			};
 		}
 
-		const existente = unoPorTelefono ?? porCorreo;
-		const nombre = splitName(payload.nombre_completo ?? null, correo ?? "");
+		if (unoPorTelefono) return { ok: true, valor: { accion: "usar", id: unoPorTelefono.id } };
 
-		if (existente) {
-			// NO se sobreescribe `phone`: si el contacto ya tenía otro número,
-			// pisarlo borraría el dato de una persona. El de WhatsApp va a su
-			// campo dinámico (Task 7).
-			await tx.contact.update({
-				where: { id: existente.id },
-				data: {
-					// Los nativos se llenan sólo si están vacíos: no le pisamos al
-					// comercial lo que corrigió a mano (spec §4).
-					...(payload.cargo ? { title: undefined } : {}),
-					companyId: companyId ?? undefined,
-				},
-			});
-			return { ok: true, companyId, contactId: existente.id };
+		if (porCorreo) {
+			// Un correo escrito en una conversación NO prueba que la persona sea
+			// la dueña de ese contacto ni que trabaje ahí. Si el contacto hallado
+			// por correo ya tiene OTRO teléfono, vincular sería atribuirle a un
+			// tercero una conversación que no tuvo.
+			if (porCorreo.phone && porCorreo.phone !== payload.telefono) {
+				return {
+					ok: false,
+					codigo: "telefono_incompatible",
+					motivo:
+						`El contacto con ese correo ya tiene el teléfono ${porCorreo.phone}. ` +
+						"Vincularlo atribuiría esta conversación a otra persona.",
+				};
+			}
+			return { ok: true, valor: { accion: "usar", id: porCorreo.id } };
 		}
 
+		return { ok: true, valor: { accion: "crear" } };
+	}
+
+	/// Ejecuta un plan ya aceptado. Se llama **después** de que la resolución
+	/// completa dio ok, así que no puede dejar efectos de un evento rechazado.
+	async aplicarIdentidad(
+		tx: Prisma.TransactionClient,
+		payload: LeadInTouchPayload,
+		plan: PlanIdentidad,
+	): Promise<{ companyId: string | null; contactId: string }> {
+		let companyId: string | null = null;
+		if (plan.empresa.accion === "usar") {
+			companyId = plan.empresa.id;
+		} else if (plan.empresa.accion === "crear") {
+			const creada = await tx.company.create({
+				data: {
+					name: plan.empresa.nombre,
+					domain: plan.empresa.dominio,
+					// NO se inventa `website`: derivarlo del dominio lo presentaría
+					// como un sitio verificado, y nadie lo verificó.
+					industry: payload.industria || null,
+					subIndustry: payload.subtipo_automotriz || null,
+				},
+				select: { id: true },
+			});
+			companyId = creada.id;
+		}
+
+		if (plan.contacto.accion === "usar") {
+			// Los nativos se llenan sólo si están vacíos: no se pisa lo que un
+			// comercial corrigió a mano. `phone` y `companyId` NO se tocan --
+			// una observación del bot no reemplaza un dato verificado.
+			const actual = await tx.contact.findUniqueOrThrow({
+				where: { id: plan.contacto.id },
+				select: { title: true, email: true, companyId: true },
+			});
+			await tx.contact.update({
+				where: { id: plan.contacto.id },
+				data: {
+					title: actual.title ? undefined : payload.cargo || undefined,
+					email: actual.email ? undefined : normalizeEmail(payload.correo ?? "") ?? undefined,
+					companyId: actual.companyId ? undefined : companyId ?? undefined,
+				},
+			});
+			return { companyId: actual.companyId ?? companyId, contactId: plan.contacto.id };
+		}
+
+		const nombre = splitName(
+			payload.nombre_completo ?? null,
+			normalizeEmail(payload.correo ?? "") ?? "",
+		);
 		const creado = await tx.contact.create({
 			data: {
 				firstName: nombre.firstName,
+				// `splitName` devuelve null cuando no hay apellido: no se inventa.
 				lastName: nombre.lastName,
-				email: correo,
+				email: normalizeEmail(payload.correo ?? ""),
 				phone: payload.telefono,
 				title: payload.cargo || null,
 				companyId,
@@ -1356,7 +1847,7 @@ export class IngestIdentityService {
 			},
 			select: { id: true },
 		});
-		return { ok: true, companyId, contactId: creado.id };
+		return { companyId, contactId: creado.id };
 	}
 }
 ```
@@ -1364,10 +1855,13 @@ export class IngestIdentityService {
 - [ ] **Step 4: Correr los tests**
 
 ```bash
-docker compose exec api bun test apps/api/test/ingest-identity.spec.ts
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-identity.spec.ts
 ```
 
-Expected: PASS, los 9.
+Expected: PASS, los 13. Contra **Postgres real** — con SQLite no se puede
+afirmar nada sobre restricciones ni carreras.
 
 - [ ] **Step 5: Verificar que la suite no dejó basura**
 
@@ -1382,16 +1876,21 @@ Expected: sólo los archivos que se van a commitear. Un test que deja el repo su
 ```bash
 git add apps/api/src/ingest/ingest-identity.service.ts \
         apps/api/test/ingest-identity.spec.ts
-git commit -m "feat(ingest): resolucion de identidad sin adivinanzas
+git commit -m "feat(ingest): resolucion de identidad en dos fases, sin efectos parciales
 
-Reusa domainFromEmail de upstream, que ya descarta gmail y 20 proveedores
-mas: sin eso todos los contactos con correo personal caerian en una misma
-empresa. Sin dominio NO se fusiona por nombre, para que un 'Acme' dicho por
-WhatsApp no entre en el Acme real que cargo una persona.
+resolver() DECIDE sin escribir y aplicarIdentidad() ejecuta el plan. Antes se
+creaba la Company y despues podia devolver conflicto de contacto, pero la
+transaccion commiteaba igual: quedaba una empresa creada por un evento
+rechazado.
 
-Dos casos devuelven conflicto en vez de elegir: varios contactos con el
-mismo telefono, y telefono y correo apuntando a contactos distintos. Y un
-contacto hallado por correo nunca pierde el telefono que ya tenia."
+El vinculo de origen manda sobre toda heuristica. Sin dominio NO se fusiona
+por nombre, tampoco entre empresas sin dominio: dos homonimas pueden ser dos
+empresas, y desfusionar no se puede. No se inventa website desde el dominio.
+
+Cuatro codigos de conflicto en vez de elegir: telefono_ambiguo,
+identidad_dividida, telefono_incompatible y vinculo_roto. Un correo escrito
+en una conversacion no prueba posesion, asi que un match por correo con
+telefono incompatible tampoco vincula."
 ```
 
 ---
@@ -1403,14 +1902,14 @@ contacto hallado por correo nunca pierde el telefono que ya tenia."
 - Create: `/home/admincrm/compai-crm/apps/api/test/ingest-write.spec.ts`
 
 **Interfaces:**
-- Consumes: `ResolucionIdentidad` (Task 6); `CAMPOS_INTOUCH` (Task 4); `LeadInTouchPayload` (Task 5).
-- Produces: `IngestWriteService` con `escribir(tx, payload, identidad, ownerId): Promise<{ dealId: string | null }>`, y las funciones puras `debeAbrirOportunidad(payload): boolean` y `textoDeLista(valores): string`.
+- Consumes: el resultado de `aplicarIdentidad` (Task 6); `CAMPOS_INTOUCH` (Task 4); `LeadInTouchPayload` (Task 5).
+- Produces: `IngestWriteService` con `escribir(tx, payload, identidad, ownerId): Promise<{ dealId: string | null }>` donde `identidad: { companyId: string | null; contactId: string }`, y las funciones puras `debeAbrirOportunidad(payload): boolean`, `textoDeLista(valores): string` y `claveDeEfecto(payload, tipo): string`.
 
 - [ ] **Step 1: Escribir el test que falla**
 
 ```typescript
 // apps/api/test/ingest-write.spec.ts
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { ActivityType, DealStage, db } from "@crm/db";
 import { sembrarCamposInTouch } from "../src/ingest/ingest-fields";
 import {
@@ -1576,6 +2075,60 @@ describe("escritura comercial", () => {
 		expect(tarea?.completedAt).toBeNull();
 	});
 
+	test("solicita_consultoria TAMBIÉN deja seguimiento accionable", async () => {
+		// Estaba omitido en el diseño anterior: pedir una consultoría es una
+		// solicitud explícita igual que pedir hablar con alguien, y quedaba
+		// sólo como un booleano en un campo.
+		const r = await corrida({
+			solicita_consultoria: true, telefono: "56900000919",
+		});
+		const tarea = await db.activity.findFirst({
+			where: { contactId: r.contactId, type: ActivityType.TASK },
+		});
+		expect(tarea).not.toBeNull();
+		expect(tarea?.subject).toContain("consultoría");
+	});
+
+	test("el mismo true repetido en otro snapshot NO crea otra tarea", async () => {
+		// El emisor manda el objeto completo en cada revisión, así que
+		// `solicita_contacto_humano: true` vuelve a llegar en todas. Sin clave
+		// de efecto, el comercial recibe una tarea nueva por cada mensaje.
+		const p = { solicita_contacto_humano: true, telefono: "56900000920" };
+		const primera = await corrida(p);
+		await corrida({ ...p, evento_id: crypto.randomUUID(), revision: 2 });
+		expect(await db.activity.count({
+			where: { contactId: primera.contactId, type: ActivityType.TASK },
+		})).toBe(1);
+	});
+
+	test("una tarea ya completada no se reabre ni se duplica", async () => {
+		const p = { solicita_contacto_humano: true, telefono: "56900000921" };
+		const primera = await corrida(p);
+		const tarea = await db.activity.findFirstOrThrow({
+			where: { contactId: primera.contactId, type: ActivityType.TASK },
+		});
+		await db.activity.update({
+			where: { id: tarea.id }, data: { completedAt: new Date() },
+		});
+		await corrida({ ...p, evento_id: crypto.randomUUID(), revision: 2 });
+		const despues = await db.activity.findUniqueOrThrow({ where: { id: tarea.id } });
+		expect(despues.completedAt).not.toBeNull();
+		expect(await db.activity.count({
+			where: { contactId: primera.contactId, type: ActivityType.TASK },
+		})).toBe(1);
+	});
+
+	test("una nota idéntica no se repite sin información nueva", async () => {
+		const p = {
+			resumen_conversacion: "Pidió precios.", telefono: "56900000922",
+		};
+		const primera = await corrida(p);
+		await corrida({ ...p, evento_id: crypto.randomUUID(), revision: 2 });
+		expect(await db.activity.count({
+			where: { contactId: primera.contactId, type: ActivityType.NOTE },
+		})).toBe(1);
+	});
+
 	test("no deja TASK cuando nadie pidió hablar con una persona", async () => {
 		const r = await corrida({ telefono: "56900000917" });
 		const tarea = await db.activity.findFirst({
@@ -1596,7 +2149,7 @@ describe("escritura comercial", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-write.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-write.spec.ts
 ```
 
 Expected: FAIL — no existe el módulo.
@@ -1617,12 +2170,23 @@ import {
 import { Injectable, Logger } from "@nestjs/common";
 import { CAMPOS_INTOUCH } from "./ingest-fields";
 import type { LeadInTouchPayload } from "./ingest.contracts";
-import type { ResolucionIdentidad } from "./ingest-identity.service";
+
 
 /// Días que se le dan a la tarea de contactar cuando alguien pidió hablar con
 /// una persona. Corto a propósito: un lead que pidió contacto humano y espera
 /// una semana ya se perdió.
 const DIAS_PARA_CONTACTAR = 1;
+
+/// Identifica un efecto que debe ocurrir UNA vez por contacto, aunque el dato
+/// que lo provoca vuelva a llegar en cada revisión.
+///
+/// El emisor manda el objeto completo en cada snapshot, así que
+/// `solicita_contacto_humano: true` reaparece en todas. Sin esta clave, el
+/// comercial recibe una tarea nueva por cada mensaje que escriba el contacto
+/// -- la forma más rápida de que apaguen las notificaciones.
+export function claveDeEfecto(payload: LeadInTouchPayload, tipo: string): string {
+	return `${payload.origen}:${payload.clave_contacto}:${tipo}`;
+}
 
 /// Cuándo el lead justifica abrir una oportunidad en el pipeline.
 ///
@@ -1652,7 +2216,7 @@ export class IngestWriteService {
 	async escribir(
 		tx: Prisma.TransactionClient,
 		payload: LeadInTouchPayload,
-		identidad: Extract<ResolucionIdentidad, { ok: true }>,
+		identidad: { companyId: string | null; contactId: string },
 		ownerId: string,
 	): Promise<{ dealId: string | null }> {
 		const dealId = debeAbrirOportunidad(payload)
@@ -1668,7 +2232,7 @@ export class IngestWriteService {
 	private async oportunidad(
 		tx: Prisma.TransactionClient,
 		payload: LeadInTouchPayload,
-		identidad: Extract<ResolucionIdentidad, { ok: true }>,
+		identidad: { companyId: string | null; contactId: string },
 		ownerId: string,
 	): Promise<string | null> {
 		// Deal.companyId es obligatorio: sin empresa no hay oportunidad que abrir.
@@ -1699,7 +2263,14 @@ export class IngestWriteService {
 				companyId: identidad.companyId,
 				ownerId,
 				// Explícita a propósito: el default del schema es DEMO_BOOKED, que
-				// afirmaría una demo agendada.
+				// afirmaría una demo agendada que el bot nunca agendó.
+				//
+				// QUALIFIED_TO_BUY es la menos incorrecta del enum instalado, no
+				// la correcta: afirma que alguien calificó al contacto como apto
+				// para comprar, y lo que pasó es que un bot recogió antecedentes.
+				// Se eligió DELIBERADAMENTE y queda anotado en RUNBOOK.md; si el
+				// equipo comercial define una etapa de entrada, se cambia acá y
+				// en el test que la ancla.
 				stage: DealStage.QUALIFIED_TO_BUY,
 				contacts: { create: { contactId: identidad.contactId } },
 			},
@@ -1797,13 +2368,22 @@ export class IngestWriteService {
 		].filter(Boolean);
 
 		if (partes.length > 0) {
+			const cuerpo = partes.join("\n\n");
+			// Una nota idéntica no aporta: el extractor reescribe el resumen en
+			// casi cada turno, y el timeline se vuelve ilegible.
+			const repetida = await tx.activity.findFirst({
+				where: { contactId, type: ActivityType.NOTE, body: cuerpo },
+				select: { id: true },
+			});
+			if (repetida) return;
+
 			await tx.activity.create({
 				data: {
 					type: ActivityType.NOTE,
 					subject: `Conversación con el Asesor Comercial IA (${payload.lead_score || "sin calificar"})`,
 					// Texto del contacto y del modelo: se guarda como texto y nunca
 					// se renderiza como HTML.
-					body: partes.join("\n\n"),
+					body: cuerpo,
 					occurredAt: new Date(),
 					contactId,
 					dealId,
@@ -1813,24 +2393,56 @@ export class IngestWriteService {
 			});
 		}
 
-		if (!payload.solicita_contacto_humano) return;
+		// Las DOS solicitudes explícitas generan seguimiento. La consultoría
+		// estaba omitida en el diseño anterior y quedaba sólo como un booleano
+		// en un campo, que es exactamente lo que el encargo prohíbe.
+		const solicitudes: Array<{ tipo: string; asunto: string }> = [];
+		if (payload.solicita_contacto_humano) {
+			solicitudes.push({
+				tipo: "contacto_humano",
+				asunto: "El contacto pidió hablar con una persona",
+			});
+		}
+		if (payload.solicita_consultoria) {
+			solicitudes.push({
+				tipo: "consultoria",
+				asunto: "El contacto pidió una consultoría",
+			});
+		}
 
-		const vence = new Date();
-		vence.setDate(vence.getDate() + DIAS_PARA_CONTACTAR);
-		await tx.activity.create({
-			data: {
-				type: ActivityType.TASK,
-				subject: "El contacto pidió hablar con una persona",
-				body:
-					"Pedido explícito durante la conversación con el bot. " +
-					`Teléfono de WhatsApp: ${payload.telefono}.`,
-				dueAt: vence,
-				contactId,
-				dealId,
-				createdById: ownerId,
-				meta: { origen: payload.origen, revision: payload.revision },
-			},
-		});
+		for (const solicitud of solicitudes) {
+			const clave = claveDeEfecto(payload, solicitud.tipo);
+			// Idempotente por clave de efecto, incluyendo las ya completadas: una
+			// tarea que el comercial cerró NO se vuelve a abrir porque el mismo
+			// true llegó en otro snapshot.
+			const yaExiste = await tx.activity.findFirst({
+				where: { contactId, type: ActivityType.TASK, meta: { path: ["clave"], equals: clave } },
+				select: { id: true },
+			});
+			if (yaExiste) continue;
+
+			const vence = new Date();
+			vence.setDate(vence.getDate() + DIAS_PARA_CONTACTAR);
+			await tx.activity.create({
+				data: {
+					type: ActivityType.TASK,
+					subject: solicitud.asunto,
+					body:
+						"Pedido explícito durante la conversación con el bot. " +
+						`Teléfono de WhatsApp: ${payload.telefono}.`,
+					dueAt: vence,
+					contactId,
+					dealId,
+					// `createdById` es el AUTOR técnico, no el asignatario: Activity
+					// no tiene campo de asignación. Quien la trabaja es el dueño de
+					// la oportunidad, y por eso el dueño se resuelve de configuración.
+					createdById: ownerId,
+					meta: {
+						origen: payload.origen, revision: payload.revision, clave,
+					},
+				},
+			});
+		}
 	}
 }
 ```
@@ -1838,10 +2450,12 @@ export class IngestWriteService {
 - [ ] **Step 4: Correr los tests**
 
 ```bash
-docker compose exec api bun test apps/api/test/ingest-write.spec.ts
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-write.spec.ts
 ```
 
-Expected: PASS, los 13.
+Expected: PASS, los 18.
 
 - [ ] **Step 5: Commit**
 
@@ -1876,7 +2490,7 @@ una TASK con vencimiento -- no un booleano olvidado."
 
 ```typescript
 // apps/api/test/ingest-idempotency.spec.ts
-import { beforeEach, describe, expect, test } from "bun:test";
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
 import { db } from "@crm/db";
 import { IngestIdentityService } from "../src/ingest/ingest-identity.service";
 import { IngestService } from "../src/ingest/ingest.service";
@@ -1919,9 +2533,24 @@ describe("idempotencia de la ingesta", () => {
 		});
 		ownerId = u.id;
 		await sembrarCamposInTouch(db);
+		// Sólo lo de ESTA clave de contacto, que es propia de la suite.
 		await db.leadIngestEvent.deleteMany({ where: { claveContacto: "d".repeat(32) } });
-		await db.contact.deleteMany({ where: { phone: { startsWith: "569000009" } } });
-		await db.company.deleteMany({ where: { name: { startsWith: "PRUEBA INTEGRACIÓN" } } });
+	});
+
+	// Igual que en el spec de identidad: se borra por id, nunca por prefijo.
+	afterEach(async () => {
+		const eventos = await db.leadIngestEvent.findMany({
+			where: { claveContacto: { in: ["d".repeat(32), "e".repeat(32), "e1".repeat(16), "f1".repeat(16)] } },
+			select: { contactId: true, companyId: true, dealId: true },
+		});
+		for (const e of eventos) {
+			if (e.dealId) await db.deal.delete({ where: { id: e.dealId } }).catch(() => {});
+			if (e.contactId) await db.contact.delete({ where: { id: e.contactId } }).catch(() => {});
+			if (e.companyId) await db.company.delete({ where: { id: e.companyId } }).catch(() => {});
+		}
+		await db.leadIngestEvent.deleteMany({
+			where: { claveContacto: { in: ["d".repeat(32), "e".repeat(32), "e1".repeat(16), "f1".repeat(16)] } },
+		});
 	});
 
 	test("el primer envío crea", async () => {
@@ -2017,6 +2646,71 @@ describe("idempotencia de la ingesta", () => {
 		expect(deal.stage).toBe("CLOSED_WON");
 	});
 
+	test("repetir un evento que quedó en CONFLICTO sigue siendo conflicto", async () => {
+		// El bug del diseño anterior: el replay se decidía sólo comparando el
+		// hash, y un evento en conflicto se guarda CON su hash. Así que el
+		// reintento devolvía `status: "replayed"` con `contactId: ""` -- un
+		// éxito falso con un id vacío.
+		await db.contact.create({ data: { firstName: "A", phone: "56900000925" } });
+		await db.contact.create({ data: { firstName: "B", phone: "56900000925" } });
+		const p = payload({ telefono: "56900000925", clave_contacto: "e1".repeat(16) });
+
+		const primero = await servicio.ingerir(p, ownerId);
+		expect(primero.estado).toBe("conflict");
+
+		const segundo = await servicio.ingerir(p, ownerId);
+		expect(segundo.estado).toBe("conflict");
+		expect(JSON.stringify(segundo)).not.toContain('"contactId":""');
+	});
+
+	test("ningún resultado exitoso lleva contactId vacío", async () => {
+		const r = await servicio.ingerir(payload(), ownerId);
+		if (r.estado === "created" || r.estado === "replayed" || r.estado === "updated") {
+			expect(r.contactId).toBeTruthy();
+		}
+	});
+
+	test("el mismo evento_id con OTRA revisión es conflicto, aunque el hash coincida", async () => {
+		// El evento identifica un intento: si vuelve con otra revisión, el
+		// emisor está diciendo algo distinto de lo que dijo, y eso no es un
+		// reintento aunque el contenido de negocio sea idéntico.
+		const p = payload();
+		await servicio.ingerir(p, ownerId);
+		const r = await servicio.ingerir({ ...p, revision: 7 }, ownerId);
+		expect(r.estado).toBe("conflict");
+	});
+
+	test("el cursor avanza sólo con revisiones APLICADAS, no con conflictos", async () => {
+		// Un conflicto con revisión alta no puede bloquear una revisión válida
+		// más baja que llegue después: el cursor es "última aplicada".
+		await servicio.ingerir(payload({ revision: 1 }), ownerId);
+		await db.contact.create({ data: { firstName: "X", phone: "56900000926" } });
+		await db.contact.create({ data: { firstName: "Y", phone: "56900000926" } });
+		// Revisión 9, pero en conflicto: NO debe mover el cursor.
+		const conflictivo = await servicio.ingerir(
+			payload({ evento_id: crypto.randomUUID(), revision: 9, telefono: "56900000926" }),
+			ownerId,
+		);
+		expect(conflictivo.estado).toBe("conflict");
+		// Revisión 2, válida: tiene que aplicarse.
+		const valido = await servicio.ingerir(
+			payload({ evento_id: crypto.randomUUID(), revision: 2, cargo: "Gerenta" }),
+			ownerId,
+		);
+		expect(valido.estado).toBe("updated");
+	});
+
+	test("un fallo escribiendo deja cero efectos y el cursor sin avanzar", async () => {
+		const antesContactos = await db.contact.count();
+		const antesEventos = await db.leadIngestEvent.count();
+		const romper = { ...servicio } as unknown as { escritura: { escribir: unknown } };
+		await expect(
+			servicio.ingerirConEscrituraQueFalla(payload({ clave_contacto: "f1".repeat(16) }), ownerId),
+		).rejects.toThrow();
+		expect(await db.contact.count()).toBe(antesContactos);
+		expect(await db.leadIngestEvent.count()).toBe(antesEventos);
+	});
+
 	test("el hash del receptor ignora los campos de transporte", async () => {
 		// Si evento_id o revision entraran al hash, dos reintentos del mismo
 		// envio tendrian hashes distintos y el replay se leeria como conflicto.
@@ -2053,7 +2747,9 @@ describe("idempotencia de la ingesta", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-idempotency.spec.ts
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-idempotency.spec.ts
 ```
 
 Expected: FAIL — no existe `IngestService`.
@@ -2129,32 +2825,83 @@ export class IngestService {
 			});
 
 			if (mismoEvento) {
-				if (mismoEvento.payloadHash === hash) {
-					// Reintento del mismo envío: se devuelve lo ya creado, sin escribir.
+				// ORDEN DE LOS CHEQUEOS, y acá estaba un bug del diseño anterior:
+				// un evento en CONFLICTO se guarda con su hash, así que decidir el
+				// replay sólo por hash devolvía `status: "replayed"` con
+				// `contactId: ""` -- un éxito falso con id vacío que el emisor
+				// habría reintentado para siempre. El estado se mira PRIMERO.
+				if (mismoEvento.status === "conflict") {
 					return {
-						estado: "replayed" as const,
-						companyId: mismoEvento.companyId,
-						contactId: mismoEvento.contactId ?? "",
-						dealId: mismoEvento.dealId,
-						revision: mismoEvento.revision,
-						eventoId: mismoEvento.eventoId,
+						estado: "conflict" as const,
+						motivo:
+							mismoEvento.conflictReason ??
+							"Este evento ya quedó en conflicto y necesita resolución humana.",
 					};
 				}
-				// Mismo intento con otro contenido: nunca sobrescritura silenciosa.
+
+				// El evento identifica un INTENTO. Si vuelve con otra revisión, el
+				// emisor está afirmando algo distinto: es conflicto aunque el
+				// contenido de negocio sea idéntico.
+				if (mismoEvento.revision !== payload.revision) {
+					return {
+						estado: "conflict" as const,
+						motivo:
+							`El evento ${payload.evento_id} se registró con revisión ` +
+							`${mismoEvento.revision} y ahora llega con ${payload.revision}.`,
+					};
+				}
+
+				if (mismoEvento.payloadHash !== hash) {
+					// Mismo intento con otro contenido: nunca sobrescritura silenciosa.
+					return {
+						estado: "conflict" as const,
+						motivo:
+							`El evento ${payload.evento_id} ya se registró con otro contenido. ` +
+							"Una calificación nueva tiene que llevar un evento_id nuevo.",
+					};
+				}
+
+				if (!mismoEvento.contactId) {
+					// Estado aplicado pero sin contacto: es incoherente y no se
+					// devuelve como éxito. Nunca un 2xx con contactId vacío.
+					return {
+						estado: "conflict" as const,
+						motivo:
+							`El evento ${payload.evento_id} está marcado como aplicado pero ` +
+							"no tiene contacto asociado. Requiere revisión.",
+					};
+				}
+
+				// Reintento del mismo envío: se devuelve lo ya creado, sin escribir
+				// nada y sin volver a resolver identidad.
 				return {
-					estado: "conflict" as const,
-					motivo:
-						`El evento ${payload.evento_id} ya se registró con otro contenido. ` +
-						"Una calificación nueva tiene que llevar un evento_id nuevo.",
+					estado: "replayed" as const,
+					companyId: mismoEvento.companyId,
+					contactId: mismoEvento.contactId,
+					dealId: mismoEvento.dealId,
+					revision: mismoEvento.revision,
+					eventoId: mismoEvento.eventoId,
 				};
 			}
 
+			// El cursor es la última revisión **APLICADA**, no la máxima recibida:
+			// un evento que quedó en conflicto con revisión alta no puede
+			// bloquear una revisión válida más baja que llegue después.
 			const ultimo = await tx.leadIngestEvent.findFirst({
-				where: { origin: payload.origen, claveContacto: payload.clave_contacto },
+				where: {
+					origin: payload.origen,
+					claveContacto: payload.clave_contacto,
+					status: { in: ["created", "updated"] },
+				},
 				orderBy: { revision: "desc" },
 			});
 
 			// Una revisión que no avanza llegó fuera de orden: no pisa a la nueva.
+			//
+			// Esto SUPONE que el emisor manda snapshots completos y no parches --
+			// verificado en `payload_del_lead`, que serializa el modelo entero en
+			// cada envío. Con parches habría que aplicarlos en orden en vez de
+			// descartarlos, y la Task 10 ancla ese supuesto con un test.
 			if (ultimo && payload.revision <= ultimo.revision) {
 				return {
 					estado: "stale" as const,
@@ -2166,10 +2913,12 @@ export class IngestService {
 
 			const resuelta = await this.identidad.resolver(tx, payload);
 			if (!resuelta.ok) {
-				// El evento se registra con su motivo para que el fallo sea
-				// diagnosticable, pero ninguna fila comercial se crea. La
-				// transacción no se aborta: perder el rastro del conflicto haría
-				// que el lead desapareciera sin explicación.
+				// El evento se registra con su motivo para que el conflicto sea
+				// diagnosticable y reejecutable, pero ninguna fila comercial se
+				// crea -- y no puede haberse creado, porque `resolver` no escribe.
+				//
+				// Este registro NO avanza el cursor: su `status` es "conflict" y
+				// la consulta del cursor sólo mira created/updated.
 				await tx.leadIngestEvent.create({
 					data: {
 						origin: payload.origen,
@@ -2185,7 +2934,10 @@ export class IngestService {
 				return { estado: "conflict" as const, motivo: resuelta.motivo };
 			}
 
-			const { dealId } = await this.escritura.escribir(tx, payload, resuelta, ownerId);
+			// El plan se ejecuta recién acá: la resolución no escribió nada, así
+			// que un conflicto descubierto arriba no dejó efectos parciales.
+			const identidad = await this.identidad.aplicarIdentidad(tx, payload, resuelta.plan);
+			const { dealId } = await this.escritura.escribir(tx, payload, identidad, ownerId);
 			const estado = ultimo ? ("updated" as const) : ("created" as const);
 
 			await tx.leadIngestEvent.create({
@@ -2198,16 +2950,16 @@ export class IngestService {
 					// El cuerpo íntegro: la copia reversible de los arrays.
 					payload: payload as unknown as Prisma.InputJsonValue,
 					status: estado,
-					companyId: resuelta.companyId,
-					contactId: resuelta.contactId,
+					companyId: identidad.companyId,
+					contactId: identidad.contactId,
 					dealId,
 				},
 			});
 
 			return {
 				estado,
-				companyId: resuelta.companyId,
-				contactId: resuelta.contactId,
+				companyId: identidad.companyId,
+				contactId: identidad.contactId,
 				dealId,
 				revision: payload.revision,
 				eventoId: payload.evento_id,
@@ -2220,10 +2972,18 @@ export class IngestService {
 - [ ] **Step 4: Correr los tests**
 
 ```bash
-docker compose exec api bun test apps/api/test/ingest-idempotency.spec.ts
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-idempotency.spec.ts
 ```
 
-Expected: PASS, los 9. El de concurrencia es el que importa: si falla, el advisory lock no está serializando.
+Expected: PASS, los 14. Dos son los que importan: el de **concurrencia** (si
+falla, el advisory lock no está serializando) y el de **repetir un conflicto**
+(si devuelve `replayed`, volvió el éxito falso con `contactId` vacío).
+
+Nota sobre el test del rollback: `ingerirConEscrituraQueFalla` es un helper de
+prueba que inyecta un `IngestWriteService` cuyo `escribir` lanza. Escribirlo en
+el spec, no en el servicio.
 
 - [ ] **Step 5: Commit**
 
@@ -2236,9 +2996,16 @@ Reusa lockIdempotencyKey de packages/db (advisory lock de Postgres), que ya
 existia: serializa los envios concurrentes del mismo contacto en vez de
 dejarlos chocar contra la restriccion unica.
 
-Mismo evento_id con otro contenido = conflicto, nunca sobrescritura. Una
-revision que no avanza = stale, para que una revision fuera de orden no
-pise a la nueva. Y la etapa de una oportunidad ya abierta no se toca."
+Tres correcciones sobre el disenio anterior:
+- El estado se mira ANTES del hash. Un evento en conflicto se guarda CON su
+  hash, asi que decidir el replay por hash devolvia status replayed con
+  contactId vacio: un exito falso que el emisor habria reintentado siempre.
+- El cursor es la ultima revision APLICADA, no la maxima recibida. Un
+  conflicto con revision alta no puede bloquear una revision valida menor.
+- El mismo evento_id con otra revision es conflicto aunque el hash de
+  negocio coincida: el evento identifica un intento, no un contenido.
+
+Ningun resultado exitoso puede llevar contactId vacio."
 ```
 
 ---
@@ -2273,6 +3040,7 @@ import { createApp } from "../src/create-app";
 let servidor: unknown;
 let keyDeIngesta: string;
 let keyDeOtro: string;
+let cookieDeComercial: string;
 
 function cuerpo(over: Record<string, unknown> = {}) {
 	return {
@@ -2298,8 +3066,23 @@ describe("POST /api/ingest/intouch-lead", () => {
 		// Las dos keys se preparan con el mismo API de servidor que la Task 2.
 		keyDeIngesta = process.env.TEST_INGEST_KEY ?? "";
 		keyDeOtro = process.env.TEST_OTHER_USER_KEY ?? "";
+		cookieDeComercial = process.env.TEST_SESSION_COOKIE ?? "";
 		expect(keyDeIngesta).not.toBe("");
 		expect(keyDeOtro).not.toBe("");
+		expect(cookieDeComercial).not.toBe("");
+	});
+
+	test("la key de ingesta NO sirve para leer el resto del CRM", async () => {
+		// La comprobación que decide si la credencial está realmente acotada.
+		// Una key de usuario con acceso total, verificada sólo en esta ruta,
+		// sigue sirviendo para leer contactos por cualquier otra.
+		for (const ruta of [
+			"/api/contacts.list", "/api/companies.list",
+			"/api/users.list", "/api/deals.list",
+		]) {
+			const r = await request(servidor).get(ruta).set("x-api-key", keyDeIngesta);
+			expect([401, 403, 404]).toContain(r.status);
+		}
 	});
 
 	test("con la key del principal de ingesta: 201 con ids", async () => {
@@ -2335,6 +3118,46 @@ describe("POST /api/ingest/intouch-lead", () => {
 			.set("x-api-key", "crm_inventada_0000000000")
 			.send(cuerpo({ evento_id: crypto.randomUUID() }));
 		expect(r.status).toBe(401);
+	});
+
+	test("cookie de sesión VÁLIDA + key inventada: rechazo", async () => {
+		// El caso que confunde identidades: si el guard resuelve la sesión de la
+		// cookie cuando la key no sirve, una key basura pasaría siempre que el
+		// navegador traiga una sesión -- y peor, con la identidad de esa persona.
+		const r = await request(servidor)
+			.post("/api/ingest/intouch-lead")
+			.set("x-api-key", "crm_inventada_0000000000")
+			.set("Cookie", cookieDeComercial)
+			.send(cuerpo({ evento_id: crypto.randomUUID() }));
+		expect([401, 403]).toContain(r.status);
+	});
+
+	test("sólo cookie de comercial, sin key: rechazo", async () => {
+		const r = await request(servidor)
+			.post("/api/ingest/intouch-lead")
+			.set("Cookie", cookieDeComercial)
+			.send(cuerpo({ evento_id: crypto.randomUUID() }));
+		expect([401, 403]).toContain(r.status);
+	});
+
+	test("Content-Type no admitido: 415", async () => {
+		const r = await request(servidor)
+			.post("/api/ingest/intouch-lead")
+			.set("x-api-key", keyDeIngesta)
+			.set("Content-Type", "text/plain")
+			.send("origen=wsp_intouch");
+		expect(r.status).toBe(415);
+	});
+
+	test("sin dueño configurado: 503, no 409", async () => {
+		// El diseño anterior documentaba 503 y lanzaba ConflictException.
+		// El emisor clasifica: 503 es reintentable, 409 es intervención humana.
+		const r = await request(servidor)
+			.post("/api/ingest/intouch-lead")
+			.set("x-api-key", keyDeIngesta)
+			.set("x-test-sin-dueno", "1")   // el fixture desconfigura el dueño
+			.send(cuerpo({ evento_id: crypto.randomUUID() }));
+		expect(r.status).toBe(503);
 	});
 
 	test("JSON inválido: 400, no 500", async () => {
@@ -2407,7 +3230,7 @@ describe("POST /api/ingest/intouch-lead", () => {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun test apps/api/test/ingest-endpoint.spec.ts
+docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-endpoint.spec.ts
 ```
 
 Expected: FAIL — la ruta devuelve 404.
@@ -2429,7 +3252,8 @@ import { API_KEY_HEADER } from "@crm/auth";
 import type { Db } from "@crm/db";
 import {
 	BadRequestException, Body, ConflictException, Controller, ForbiddenException,
-	Headers, HttpCode, Logger, Post, Res,
+	Headers, HttpCode, Logger, Post, Req, Res, ServiceUnavailableException,
+	UnauthorizedException, UnsupportedMediaTypeException,
 } from "@nestjs/common";
 import { ConfigService } from "@nestjs/config";
 import {
@@ -2437,7 +3261,7 @@ import {
 	ApiOkResponse, ApiOperation, ApiTags,
 } from "@nestjs/swagger";
 import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
-import type { Response } from "express";
+import type { Request, Response } from "express";
 import type { EnvironmentVariables } from "../config/env.validation";
 import { InjectDatabase } from "../database/database.constants";
 import { leadInTouchSchema, MAX_INGEST_BODY_BYTES } from "./ingest.contracts";
@@ -2468,19 +3292,33 @@ export class IngestController {
 		@Session() sesion: UserSession,
 		@Headers(API_KEY_HEADER) apiKey: string | undefined,
 		@Body() body: unknown,
+		@Req() req: Request,
 		@Res({ passthrough: true }) res: Response,
 	) {
 		// 1. Tiene que venir por API key. Una sesión de cookie de navegador NO
 		// sirve: el espejo de SessionOnlyMiddleware, para que el navegador de un
 		// comercial autenticado no pueda postear leads.
+		//
+		// Y el chequeo va ANTES de mirar `sesion`: si la key es inválida, el
+		// guard puede haber resuelto la sesión desde la COOKIE, y entonces
+		// `sesion.user` es el comercial, no la integración. Sin este orden, una
+		// key basura pasaría siempre que el navegador traiga sesión.
 		if (!apiKey) {
-			throw new ForbiddenException(
+			throw new UnauthorizedException(
 				"Esta ruta se usa sólo con credencial de integración.",
+			);
+		}
+		const tipo = (req.headers["content-type"] ?? "").split(";")[0].trim();
+		if (tipo !== "application/json") {
+			throw new UnsupportedMediaTypeException(
+				"Esta ruta acepta sólo application/json.",
 			);
 		}
 
 		// 2. Y tiene que ser la key del principal de ingesta. Las keys del CRM no
 		// llevan permisos: sin esto, la de cualquier usuario serviría.
+		// Que la sesión provenga de la KEY y no de la cookie: si el guard
+		// resolvió una sesión de navegador, esto la descarta.
 		const principal = this.config.get("INTOUCH_INGEST_USER_ID", { infer: true });
 		if (!principal || sesion.user.id !== principal) {
 			this.logger.warn({
@@ -2548,9 +3386,12 @@ export class IngestController {
 			this.logger.error({
 				message: "INTOUCH_LEAD_OWNER_EMAIL no resuelve a un usuario del CRM",
 			});
-			// 503 y no 500: es configuración faltante, y el emisor tiene que
-			// reintentarlo, no descartarlo.
-			throw new ConflictException({
+			// 503 DE VERDAD. El diseño anterior documentaba 503 y lanzaba
+			// ConflictException, o sea 409 -- y el emisor clasifica por status:
+			// 503 es transitorio y se reintenta, 409 es intervención humana. Un
+			// 409 acá dejaba el lead esperando a una persona por un problema de
+			// configuración que se arregla solo al configurarla.
+			throw new ServiceUnavailableException({
 				status: "unavailable",
 				motivo: "El dueño de los leads no está configurado en el CRM.",
 			});
@@ -2574,7 +3415,7 @@ En `apps/api/src/create-app.ts`, después de `app.use(helmet())` y **antes** de 
 	// parsearlo: express responde 413 solo, sin cargarlo en memoria.
 	app.use(
 		"/api/ingest",
-		express.json({ limit: MAX_INGEST_BODY_BYTES }),
+		express.json({ limit: MAX_INGEST_BODY_BYTES, type: "application/json" }),
 	);
 ```
 
@@ -2639,12 +3480,18 @@ cd /home/admincrm/compai-crm
 # La key del principal de ingesta ya existe (Task 2). La del "otro usuario"
 # se crea igual, con otro correo, para el caso de 403.
 docker compose exec api bun tools/seed-ingest-principal.ts   # reusa la existente
-docker compose exec -e TEST_INGEST_KEY="<key de ingesta>" \
-                    -e TEST_OTHER_USER_KEY="<key de otro usuario>" \
-                    api bun test apps/api/test/ingest-endpoint.spec.ts
+docker compose -f docker-compose.crm.yml run --rm \
+  -e TEST_INGEST_KEY="$(cat /tmp/lead_sink_token)" \
+  -e TEST_OTHER_USER_KEY="<key de otro usuario>" \
+  -e TEST_SESSION_COOKIE="<cookie de sesión de un comercial de prueba>" \
+  tools bun test apps/api/test/ingest-endpoint.spec.ts
 ```
 
-Expected: PASS, los 10. **Si el caso de 403 falla**, el alcance no está puesto y el endpoint acepta la credencial de cualquiera: es un bloqueante, no un detalle.
+Expected: PASS, los 16. **Tres son bloqueantes si fallan**, no detalles:
+
+- *key válida de otro usuario → 403*: sin esto la credencial de cualquiera ingiere.
+- *cookie válida + key inventada → rechazo*: si pasa, el guard está usando la identidad de la cookie.
+- *la key de ingesta no lee el resto del CRM*: si lee, la credencial no está acotada y hay que volver al Step 4 de la Task 2.
 
 - [ ] **Step 7: Poner el rate limit en el gateway**
 
@@ -2770,6 +3617,44 @@ class EventoTest(TestCase):
         base = {"empresa": "Acme SpA", "evento_id": "uno", "revision": 1}
         otro = {"empresa": "Acme SpA", "evento_id": "dos", "revision": 9}
         self.assertEqual(hash_de_negocio(base), hash_de_negocio(otro))
+
+    def test_el_payload_es_un_SNAPSHOT_completo_y_no_un_patch(self):
+        """De esto depende todo el algoritmo de orden del receptor.
+
+        El receptor DESCARTA una revision anterior a la ultima aplicada. Eso
+        solo es correcto si cada envio trae el estado completo: con parches,
+        descartar una revision vieja perderia los campos que solo venian ahi.
+
+        `payload_del_lead` serializa _CAMPOS_DEL_PAYLOAD entero en cada envio,
+        asi que es un snapshot. Este test lo ANCLA: si alguien lo convierte en
+        un diff para ahorrar bytes, rompe la idempotencia del receptor y tiene
+        que verlo aca.
+        """
+        from bot.business.lead_intouch import _CAMPOS_DEL_PAYLOAD, marcar_evento
+
+        marcar_evento(self.lead)
+        # Un segundo envio que solo cambia un campo sigue trayendo TODOS.
+        self.lead.cargo = "Gerenta"
+        self.lead.save()
+        marcar_evento(self.lead)
+        payload = payload_del_lead(self.lead)
+        for campo in _CAMPOS_DEL_PAYLOAD:
+            self.assertIn(campo, payload, f"{campo} falta: el payload dejo de ser snapshot")
+
+    def test_los_dos_solicita_son_booleanos_reales_y_usa_ia_es_triestado(self):
+        """La semantica que el contrato del receptor tiene que respetar.
+
+        `usa_ia_actualmente` es null=True en el modelo: sus tres estados son
+        si / no / no se sabe. Los dos `solicita_*` son BooleanField(default=False)
+        sin null, asi que en el cable son siempre booleanos reales -- nunca
+        null. El receptor los valida como z.boolean() obligatorio y eso es
+        correcto; documentado aca para que nadie lo "arregle" haciendolos
+        nullable sin cambiar el receptor.
+        """
+        payload = payload_del_lead(self.lead)
+        self.assertIsNone(payload["usa_ia_actualmente"])
+        self.assertIs(payload["solicita_consultoria"], False)
+        self.assertIs(payload["solicita_contacto_humano"], False)
 
     def test_el_payload_lleva_las_tres_claves(self):
         from bot.business.lead_intouch import marcar_evento
@@ -2924,7 +3809,7 @@ cd /home/admincrm/wsp_intouch
 USE_SQLITE=true python manage.py test bot.tests.test_despachador_lead -v2
 ```
 
-Expected: PASS, todos — los 7 nuevos y los 11 que ya estaban.
+Expected: PASS, todos — los 9 nuevos y los 11 que ya estaban.
 
 - [ ] **Step 8: Verificar que nada más usaba el nombre viejo**
 
@@ -4061,47 +4946,106 @@ console.log("array reconstruido:", (evento.payload as any).canales_actuales);
 
 Expected: etapa `QUALIFIED_TO_BUY`; una `NOTE` y una `TASK`; y el array `["whatsapp", "correo, teléfono"]` **exacto**, con la coma interna intacta — es la prueba I18 en el entorno real.
 
-- [ ] **Step 9: I09 — timeout después del commit, sin duplicar**
+- [ ] **Step 9: I09 — respuesta perdida DESPUÉS del commit, sin duplicar**
+
+El punto de esta prueba es que el receptor **sí** escribió y el emisor **no**
+se enteró. Un mock de `_enviar_al_sink` no lo demuestra: evita la llamada, así
+que nunca hubo commit del otro lado. Hace falta que la petición llegue de
+verdad y que se descarte la respuesta.
+
+Un proxy mínimo en el medio que reenvía y corta:
+
+```python
+# /tmp/proxy_corta.py
+"""Reenvia el POST al receptor y CORTA antes de devolver la respuesta.
+
+Asi el receptor hace commit de verdad y el emisor ve la red cortada, que es
+exactamente el escenario de I09 y lo que un mock no puede reproducir.
+"""
+import http.server
+import urllib.request
+
+DESTINO = "http://crm-api:3001/api/ingest/intouch-lead"
+
+
+class Corta(http.server.BaseHTTPRequestHandler):
+    def do_POST(self):
+        cuerpo = self.rfile.read(int(self.headers["Content-Length"]))
+        req = urllib.request.Request(
+            DESTINO, data=cuerpo, method="POST",
+            headers={"Content-Type": "application/json",
+                     "x-api-key": self.headers.get("x-api-key", "")})
+        try:
+            urllib.request.urlopen(req, timeout=20).read()
+        except Exception as error:
+            print("el receptor respondio con error:", error, flush=True)
+        else:
+            print("el receptor APLICO el evento; corto la respuesta", flush=True)
+        # Sin status line: el emisor ve la conexion cortada.
+        self.connection.close()
+
+
+http.server.HTTPServer(("0.0.0.0", 9999), Corta).serve_forever()
+```
 
 ```bash
 cd /home/admincrm/wsp_intouch
-# Se fuerza un fallo de red DESPUÉS de que el receptor ya escribió, cortando
-# el contenedor del CRM justo después de una escritura confirmada.
-docker compose exec web python manage.py shell <<'EOF'
-from unittest.mock import patch
-from bot.business.lead_intouch import _despachar_si_corresponde
-from bot.models import LeadInTouch
-
-lead = LeadInTouch.objects.get(conversation__wa_id="56900000099")
-lead.despachado_en = None
-lead.save(update_fields=["despachado_en"])
-
-# El primer intento "se pierde" en la respuesta, con el mismo evento_id.
-with patch("bot.business.lead_intouch._enviar_al_sink", return_value=None):
-    _despachar_si_corresponde("56900000099")
-
-_despachar_si_corresponde("56900000099")   # reintento real
-lead.refresh_from_db()
-print("estado:", lead.despachado_en, lead.crm_deal_id)
-EOF
+docker compose cp /tmp/proxy_corta.py web:/tmp/proxy_corta.py
+docker compose exec -d web python /tmp/proxy_corta.py
 ```
 
-Y confirmar que no hay una segunda oportunidad:
+Se apunta el emisor al proxy y se despacha:
+
+```bash
+docker compose exec -e LEAD_SINK_URL="http://127.0.0.1:9999/x" web \
+  python manage.py shell -c "
+from bot.business.lead_intouch import _despachar_si_corresponde
+from bot.models import LeadInTouch
+l = LeadInTouch.objects.get(conversation__wa_id='56900000099')
+l.despachado_en = None; l.save(update_fields=['despachado_en'])
+_despachar_si_corresponde('56900000099')
+l.refresh_from_db()
+print('sin sellar (correcto):', l.despachado_en is None, '| evento:', l.evento_id)
+"
+docker compose logs --tail 5 web | grep 'APLICO el evento'
+```
+
+Expected: el log del proxy dice que el receptor **aplicó** el evento, y el
+lead queda **sin sellar** — que es el estado correcto: el emisor no puede
+afirmar entrega si no vio la respuesta.
+
+Y el reintento, con el **mismo** `evento_id`, contra el receptor directo:
+
+```bash
+docker compose exec web python manage.py despachar_leads_pendientes
+```
+
+Expected: `Leads despachados: 1`. Y en el CRM, **una** oportunidad:
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun -e '
+docker compose -f docker-compose.crm.yml run --rm tools bun -e '
 import { db } from "@crm/db";
-console.log("oportunidades:", await db.deal.count({
-  where: { company: { name: "PRUEBA INTEGRACIÓN SpA" } },
-}));
-console.log("eventos:", await db.leadIngestEvent.count({
-  where: { claveContacto: { not: "" } },
-}));
+const ids = await Bun.file("/tmp/ids-prueba.json").json();
+console.log("oportunidades:", await db.deal.count({ where: { companyId: ids.companyId } }));
+console.log("eventos:", await db.leadIngestEvent.count({ where: { claveContacto: ids.claveContacto } }));
+console.log("estados:", (await db.leadIngestEvent.findMany({
+  where: { claveContacto: ids.claveContacto }, select: { status: true, revision: true },
+})));
 '
 ```
 
-Expected: `oportunidades: 1`. Si sale 2, la idempotencia no está funcionando con el emisor real.
+Expected: `oportunidades: 1`, y el segundo evento con estado `replayed` — no
+un `created` nuevo. Si sale 2, la idempotencia no funciona con el emisor real
+y es un bloqueante.
+
+Al terminar, matar el proxy:
+
+```bash
+cd /home/admincrm/wsp_intouch
+docker compose exec web pkill -f proxy_corta.py
+docker compose exec web rm -f /tmp/proxy_corta.py
+```
 
 - [ ] **Step 10: I10 — el barrido recupera un pendiente tras un reinicio**
 
@@ -4167,32 +5111,66 @@ console.log("vence:", t.dueAt, "completada:", t.completedAt, "asunto:", t.subjec
 
 Expected: `dueAt` con fecha, `completedAt` en `null`.
 
-- [ ] **Step 13: I16 — los logs no filtran nada**
+- [ ] **Step 13: I16 — los logs no filtran nada, probado con canario**
+
+Una regex que no encuentra nada **no prueba** que no haya secretos: prueba que
+esa regex no coincidió. Primero se comprueba que la búsqueda *funciona*, con un
+valor canario que sí aparecería si algo se filtrara:
 
 ```bash
-cd /home/admincrm/wsp_intouch && docker compose logs --tail 200 web | grep -iE "x-api-key|crm_[a-z0-9]{8}|postgresql://|Traceback" || echo "OK: sin secretos ni stacks"
-cd /home/admincrm/compai-crm && docker compose logs --tail 200 api | grep -iE "crm_[a-z0-9]{8}|postgresql://|password" || echo "OK: sin secretos"
+CANARIO="crm_canario_$(openssl rand -hex 6)"
+cd /home/admincrm/wsp_intouch
+docker compose exec -e LEAD_SINK_TOKEN="$CANARIO" web python manage.py shell -c "
+from bot.business.lead_intouch import _enviar_al_sink
+print(_enviar_al_sink({'origen': 'wsp_intouch'}))
+"
 ```
 
-Expected: las dos líneas `OK:`.
+Y recién ahí la búsqueda, contando coincidencias en vez de imprimirlas:
 
-- [ ] **Step 14: Limpiar los datos de prueba**
+```bash
+for repo in /home/admincrm/wsp_intouch /home/admincrm/compai-crm; do
+  cd $repo
+  for patron in "$CANARIO" 'x-api-key' 'postgresql://' 'Traceback'; do
+    n=$(docker compose logs --tail 500 2>/dev/null | grep -ciE "$patron")
+    printf '%-16s %-18s %s coincidencias\n' "$(basename $repo)" "$patron" "$n"
+  done
+done
+```
+
+Expected: `0` en todas. Si el canario aparece, el token se está logueando.
+Repetir con el CRM caído: el camino de error es donde los secretos se filtran.
+
+- [ ] **Step 14: Limpiar los datos de prueba POR ID**
+
+**Nunca por prefijo.** Un `startsWith: "569000000"` o
+`name: { startsWith: "PRUEBA" }` puede borrar filas reales que casualmente
+coincidan — y en el CRM esas filas son de un cliente. Se borra por los ids
+que los pasos anteriores anotaron en `/tmp/ids-prueba.json`:
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bun -e '
+docker compose -f docker-compose.crm.yml run --rm tools bun -e '
 import { db } from "@crm/db";
-const c = await db.contact.findMany({ where: { phone: { startsWith: "569000000" } } });
-for (const x of c) await db.contact.delete({ where: { id: x.id } });
-await db.company.deleteMany({ where: { name: { startsWith: "PRUEBA INTEGRACIÓN" } } });
-await db.leadIngestEvent.deleteMany({ where: { payload: { path: ["telefono"], string_starts_with: "569000000" } } });
-console.log("limpio");
+const ids = await Bun.file("/tmp/ids-prueba.json").json();
+// Orden de dependencias: actividades y FieldValue caen por cascade al borrar
+// el contacto; el evento y el deal se borran explícitos.
+await db.leadIngestEvent.deleteMany({ where: { claveContacto: ids.claveContacto } });
+if (ids.dealId) await db.deal.delete({ where: { id: ids.dealId } });
+await db.contact.delete({ where: { id: ids.contactId } });
+if (ids.companyId) await db.company.delete({ where: { id: ids.companyId } });
+console.log("borrados por id");
 '
+```
+
+Del lado del bot, por `wa_id` **exacto** y nada más:
+
+```bash
 cd /home/admincrm/wsp_intouch
 docker compose exec web python manage.py shell -c "
 from bot.models import Conversation
-Conversation.objects.filter(wa_id__startswith='569000000').delete()
-print('limpio')
+borradas, _ = Conversation.objects.filter(wa_id='56900000099').delete()
+print('conversaciones borradas:', borradas)
 "
 ```
 
@@ -4233,8 +5211,388 @@ El bot no pasa por este bloque: le pega directo por la red crm_ingest."
 
 ---
 
+---
+
+### Task 15: Resolver un conflicto sin editar el evento
+
+**Files:**
+- Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest-conflicts.router.ts`
+- Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest-conflicts.contracts.ts`
+- Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest-resolve.service.ts`
+- Modify: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest.module.ts`
+- Create: `/home/admincrm/compai-crm/apps/api/test/ingest-resolve.spec.ts`
+
+**Interfaces:**
+- Consumes: `LeadIngestEvent` (Task 3), `IngestService` (Task 8), `IngestIdentityService` (Task 6).
+- Produces: procedimientos tRPC `ingest.conflicts.list` y `ingest.conflicts.resolve({ eventoId, contactId, motivo })`; `IngestResolveService.resolver(...)`.
+
+**Por qué esta tarea existe:** las Tasks 6 y 8 producen conflictos a propósito
+—es lo correcto frente a una identidad ambigua— pero sin esto **los conflictos
+se acumulan y nadie puede hacer nada con ellos**. El emisor reintenta, el
+receptor vuelve a decir conflicto, y el lead no llega nunca. Repetirlo por cron
+no lo resuelve.
+
+Va **detrás de la sesión de GranCRM**, no de la key de ingesta: es una
+operación humana. La key del bot no puede resolver sus propios conflictos.
+
+- [ ] **Step 1: Escribir los tests que fallan**
+
+```typescript
+// apps/api/test/ingest-resolve.spec.ts
+import { afterEach, beforeEach, describe, expect, test } from "bun:test";
+import { db } from "@crm/db";
+import { IngestResolveService } from "../src/ingest/ingest-resolve.service";
+import { IngestIdentityService } from "../src/ingest/ingest-identity.service";
+import { IngestWriteService } from "../src/ingest/ingest-write.service";
+import { IngestService } from "../src/ingest/ingest.service";
+
+const ingesta = new IngestService(db, new IngestIdentityService(), new IngestWriteService());
+const resolver = new IngestResolveService(db, ingesta);
+
+let ownerId: string;
+let actorId: string;
+
+async function conflictoDePrueba(clave: string, telefono: string) {
+	await db.contact.create({ data: { firstName: "A", phone: telefono } });
+	await db.contact.create({ data: { firstName: "B", phone: telefono } });
+	const p = {
+		origen: "wsp_intouch" as const, clave_contacto: clave,
+		evento_id: crypto.randomUUID(), revision: 1, telefono,
+		empresa: "PRUEBA INTEGRACIÓN Conflicto SpA", lead_score: "WARM" as const,
+		solicita_consultoria: false, solicita_contacto_humano: false,
+	};
+	const r = await ingesta.ingerir(p, ownerId);
+	expect(r.estado).toBe("conflict");
+	return p;
+}
+
+describe("resolución de conflictos", () => {
+	beforeEach(async () => {
+		const dueno = await db.user.upsert({
+			where: { email: "dueno-res@example.com" }, update: {},
+			create: { id: crypto.randomUUID(), name: "Dueño", email: "dueno-res@example.com", emailVerified: true },
+			select: { id: true },
+		});
+		ownerId = dueno.id;
+		const actor = await db.user.upsert({
+			where: { email: "actor-res@example.com" }, update: {},
+			create: { id: crypto.randomUUID(), name: "Actor", email: "actor-res@example.com", emailVerified: true },
+			select: { id: true },
+		});
+		actorId = actor.id;
+	});
+
+	test("lista los conflictos con su código y su motivo", async () => {
+		await conflictoDePrueba("c0".repeat(16), "56900000940");
+		const filas = await resolver.listar();
+		const fila = filas.find((f) => f.claveContacto === "c0".repeat(16));
+		expect(fila?.status).toBe("conflict");
+		expect(fila?.conflictReason).toContain("teléfono");
+	});
+
+	test("asociar una identidad aplica el evento sin editar su payload", async () => {
+		const p = await conflictoDePrueba("c1".repeat(16), "56900000941");
+		const elegido = await db.contact.findFirstOrThrow({ where: { phone: "56900000941" } });
+		const antes = await db.leadIngestEvent.findUniqueOrThrow({
+			where: { origin_eventoId: { origin: p.origen, eventoId: p.evento_id } },
+		});
+
+		const r = await resolver.resolver({
+			eventoId: p.evento_id, contactId: elegido.id,
+			motivo: "Es la misma persona, el duplicado se fusiona aparte.",
+			actorId, ownerId,
+		});
+
+		expect(r.estado).toBe("created");
+		expect(r.contactId).toBe(elegido.id);
+		// El payload original NO se toca: una corrección de contenido exige un
+		// evento nuevo del productor, no editar el ledger.
+		const despues = await db.leadIngestEvent.findUniqueOrThrow({
+			where: { origin_eventoId: { origin: p.origen, eventoId: p.evento_id } },
+		});
+		expect(despues.payload).toEqual(antes.payload);
+		expect(despues.payloadHash).toBe(antes.payloadHash);
+	});
+
+	test("registra actor y motivo", async () => {
+		const p = await conflictoDePrueba("c2".repeat(16), "56900000942");
+		const elegido = await db.contact.findFirstOrThrow({ where: { phone: "56900000942" } });
+		await resolver.resolver({
+			eventoId: p.evento_id, contactId: elegido.id,
+			motivo: "Mismo contacto verificado por teléfono.", actorId, ownerId,
+		});
+		const fila = await db.leadIngestEvent.findUniqueOrThrow({
+			where: { origin_eventoId: { origin: p.origen, eventoId: p.evento_id } },
+		});
+		expect(fila.resolvedById).toBe(actorId);
+		expect(fila.resolutionReason).toContain("verificado");
+		expect(fila.resolvedAt).not.toBeNull();
+	});
+
+	test("resolver dos veces el mismo conflicto es idempotente", async () => {
+		const p = await conflictoDePrueba("c3".repeat(16), "56900000943");
+		const elegido = await db.contact.findFirstOrThrow({ where: { phone: "56900000943" } });
+		const datos = {
+			eventoId: p.evento_id, contactId: elegido.id,
+			motivo: "Mismo contacto.", actorId, ownerId,
+		};
+		const primera = await resolver.resolver(datos);
+		const segunda = await resolver.resolver(datos);
+		expect(segunda.contactId).toBe(primera.contactId);
+		expect(await db.deal.count({
+			where: { company: { name: "PRUEBA INTEGRACIÓN Conflicto SpA" } },
+		})).toBe(1);
+	});
+
+	test("NO pisa una revisión posterior ya aplicada", async () => {
+		// Un conflicto viejo que alguien resuelve tarde no puede sobrescribir
+		// una calificación más nueva que ya entró.
+		const p = await conflictoDePrueba("c4".repeat(16), "56900000944");
+		const elegido = await db.contact.findFirstOrThrow({ where: { phone: "56900000944" } });
+		// Llega y se aplica la revisión 5.
+		await ingesta.ingerir(
+			{ ...p, evento_id: crypto.randomUUID(), revision: 5, telefono: "56900000945", cargo: "Gerenta" },
+			ownerId,
+		);
+		const r = await resolver.resolver({
+			eventoId: p.evento_id, contactId: elegido.id,
+			motivo: "Resuelto tarde.", actorId, ownerId,
+		});
+		expect(r.estado).toBe("stale");
+	});
+
+	test("un evento que no está en conflicto no se puede resolver", async () => {
+		const r = await resolver.resolver({
+			eventoId: crypto.randomUUID(), contactId: "cualquiera",
+			motivo: "x", actorId, ownerId,
+		}).catch((e) => e);
+		expect(String(r)).toMatch(/no está en conflicto|no existe/i);
+	});
+});
+```
+
+- [ ] **Step 2: Correrlos**
+
+```bash
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-resolve.spec.ts
+```
+
+Expected: FAIL — no existe `IngestResolveService`.
+
+- [ ] **Step 3: Agregar los campos de auditoría al modelo**
+
+En `packages/db/prisma/schema.prisma`, dentro de `LeadIngestEvent`:
+
+```prisma
+  resolvedById     String?
+  resolvedAt       DateTime?
+  resolutionReason String?
+  /// Identidad que una persona asoció al resolver el conflicto. Se guarda
+  /// aparte del payload: el payload es lo que dijo el productor y no se edita.
+  resolvedContactId String?
+```
+
+```bash
+docker compose -f docker-compose.crm.yml run --rm \
+  -e DATABASE_URL="postgresql://crm_owner:$POSTGRES_PASSWORD@postgres:5432/crm?schema=public" \
+  tools bunx --bun prisma migrate dev \
+    --schema packages/db/prisma/schema.prisma --name lead_ingest_resolution
+```
+
+Revisar el SQL: sólo `ALTER TABLE ... ADD COLUMN` sobre `leadIngestEvent`.
+
+- [ ] **Step 4: Escribir el servicio**
+
+```typescript
+// apps/api/src/ingest/ingest-resolve.service.ts
+//
+// La salida de un conflicto de ingesta.
+//
+// Las Tasks 6 y 8 producen conflictos a propósito: frente a una identidad
+// ambigua, no adivinar es lo correcto. Pero sin esto los conflictos se
+// acumulan y el lead no llega nunca -- el emisor reintenta, el receptor vuelve
+// a decir conflicto, y repetirlo por cron no lo resuelve.
+//
+// REGLA QUE ORDENA TODO: se asocia una identidad, NO se edita el evento. El
+// payload es lo que afirmó el productor; corregir el contenido exige un evento
+// nuevo del bot, no reescribir el ledger.
+import { type Db, Prisma } from "@crm/db";
+import { BadRequestException, Injectable, Logger, NotFoundException } from "@nestjs/common";
+import { InjectDatabase } from "../database/database.constants";
+import { IngestService, type ResultadoIngesta } from "./ingest.service";
+
+const ORIGEN = "wsp_intouch";
+
+@Injectable()
+export class IngestResolveService {
+	private readonly logger = new Logger(IngestResolveService.name);
+
+	constructor(
+		@InjectDatabase() private readonly db: Db,
+		private readonly ingesta: IngestService,
+	) {}
+
+	async listar() {
+		return this.db.leadIngestEvent.findMany({
+			where: { status: "conflict", resolvedAt: null },
+			orderBy: { createdAt: "desc" },
+			take: 200,
+			select: {
+				id: true, eventoId: true, claveContacto: true, revision: true,
+				conflictReason: true, status: true, createdAt: true,
+			},
+		});
+	}
+
+	async resolver(entrada: {
+		eventoId: string;
+		contactId: string;
+		motivo: string;
+		actorId: string;
+		ownerId: string;
+	}): Promise<ResultadoIngesta & { contactId?: string }> {
+		const evento = await this.db.leadIngestEvent.findUnique({
+			where: { origin_eventoId: { origin: ORIGEN, eventoId: entrada.eventoId } },
+		});
+		if (!evento) throw new NotFoundException("Ese evento no existe.");
+
+		// Idempotente: resolver dos veces devuelve lo mismo y no repite efectos.
+		if (evento.resolvedAt && evento.contactId) {
+			return {
+				estado: "replayed",
+				companyId: evento.companyId,
+				contactId: evento.contactId,
+				dealId: evento.dealId,
+				revision: evento.revision,
+				eventoId: evento.eventoId,
+			};
+		}
+		if (evento.status !== "conflict") {
+			throw new BadRequestException("Ese evento no está en conflicto.");
+		}
+
+		const contacto = await this.db.contact.findUnique({
+			where: { id: entrada.contactId },
+			select: { id: true, archivedAt: true },
+		});
+		if (!contacto || contacto.archivedAt) {
+			throw new BadRequestException("Ese contacto no existe o está archivado.");
+		}
+
+		// Se reejecuta el MISMO payload, con la identidad ya decidida. La
+		// reejecución revalida unicidad y orden en transacción, así que si
+		// mientras tanto se aplicó una revisión posterior, responde `stale` y no
+		// la pisa.
+		const payload = evento.payload as Prisma.JsonObject;
+		const resultado = await this.ingesta.ingerirConIdentidadResuelta(
+			payload as never,
+			entrada.ownerId,
+			{ contactId: contacto.id },
+		);
+
+		await this.db.leadIngestEvent.update({
+			where: { id: evento.id },
+			data: {
+				resolvedById: entrada.actorId,
+				resolvedAt: new Date(),
+				resolutionReason: entrada.motivo,
+				resolvedContactId: contacto.id,
+			},
+		});
+
+		this.logger.log({
+			message: "Conflicto de ingesta resuelto",
+			eventoId: evento.eventoId,
+			actorId: entrada.actorId,
+			resultado: resultado.estado,
+		});
+
+		return resultado;
+	}
+}
+```
+
+- [ ] **Step 5: Agregar el punto de entrada al `IngestService`**
+
+En `ingest.service.ts`, un método hermano de `ingerir` que salta la resolución
+de identidad porque ya viene decidida por una persona:
+
+```typescript
+	/// Igual que `ingerir`, pero con la identidad ya resuelta por una persona
+	/// (Task 15). No vuelve a resolver: eso devolvería el mismo conflicto.
+	///
+	/// Reusa el resto tal cual -- lock, chequeo de estado, cursor de revisión
+	/// aplicada y escritura en la misma transacción -- para que una resolución
+	/// manual no pueda saltarse las garantías de orden.
+	async ingerirConIdentidadResuelta(
+		payload: LeadInTouchPayload,
+		ownerId: string,
+		identidadElegida: { contactId: string },
+	): Promise<ResultadoIngesta> {
+		return this.aplicar(payload, ownerId, { forzarContactId: identidadElegida.contactId });
+	}
+```
+
+Y refactorizar `ingerir` para que delegue en un `aplicar(payload, ownerId, opciones)`
+privado que, cuando recibe `forzarContactId`, usa
+`{ empresa: {accion:"ninguna"}, contacto: {accion:"usar", id: forzarContactId} }`
+como plan en vez de llamar a `resolver`. **El resto del algoritmo no cambia**:
+mismo lock, mismo chequeo de estado, mismo cursor y misma transacción.
+
+- [ ] **Step 6: Exponer los dos procedimientos tRPC**
+
+`ingest-conflicts.router.ts`, siguiendo la forma de los demás `*.router.ts` del
+repo. Dos puntos que no se negocian:
+
+- Van con el middleware de sesión del CRM, **no** con la key de ingesta: es una
+  operación humana y queda protegida por el acceso de GranCRM (plan hermano).
+- Usar `SessionOnlyMiddleware`, que ya existe justamente para eso: rechaza una
+  petición que traiga `x-api-key`. Así la credencial del bot no puede resolver
+  sus propios conflictos.
+
+- [ ] **Step 7: Correr los tests**
+
+```bash
+cd /home/admincrm/compai-crm
+docker compose -f docker-compose.crm.yml run --rm tools \
+  bun test apps/api/test/ingest-resolve.spec.ts
+```
+
+Expected: PASS, los 6. El que importa es el de la revisión posterior: si
+devuelve `created` en vez de `stale`, una resolución tardía pisa datos nuevos.
+
+- [ ] **Step 8: Commit**
+
+```bash
+git add apps/api/src/ingest/ingest-resolve.service.ts \
+        apps/api/src/ingest/ingest-conflicts.router.ts \
+        apps/api/src/ingest/ingest-conflicts.contracts.ts \
+        apps/api/src/ingest/ingest.module.ts \
+        apps/api/src/ingest/ingest.service.ts \
+        packages/db/prisma/schema.prisma packages/db/prisma/migrations \
+        apps/api/test/ingest-resolve.spec.ts
+git commit -m "feat(ingest): resolver un conflicto sin editar el evento
+
+Las Tasks 6 y 8 producen conflictos a proposito, pero sin salida se
+acumulaban: el emisor reintentaba, el receptor volvia a decir conflicto y el
+lead no llegaba nunca.
+
+Se asocia una identidad, NO se edita el payload: es lo que afirmo el
+productor, y corregir contenido exige un evento nuevo del bot. Queda actor,
+motivo y fecha. Reusa el algoritmo completo -- lock, cursor y transaccion --
+asi que una resolucion tardia responde stale en vez de pisar una revision
+posterior ya aplicada.
+
+Va detras de la sesion de GranCRM con SessionOnlyMiddleware: la key del bot
+no puede resolver sus propios conflictos."
+```
+
+---
+
 ## Estado final esperado de este plan
 
-Con las 14 tareas en verde: **VALIDADO EN PRUEBAS, PENDIENTE DE DESPLIEGUE** — la ruta `emisor del bot → persistencia correcta → oportunidad en el pipeline` comprobada con reintentos y fallos reales, y el acceso del comercial cubierto por el plan hermano.
+Con las 15 tareas en verde: **VALIDADO EN PRUEBAS, PENDIENTE DE DESPLIEGUE** — la ruta `emisor del bot → persistencia correcta → oportunidad en el pipeline` comprobada con reintentos y fallos reales, y el acceso del comercial cubierto por el plan hermano.
 
 Lo que **no** se puede declarar con esto: que el bot capture los datos por sí solo en una conversación real. Eso es el Grupo D y espera credenciales de Meta.

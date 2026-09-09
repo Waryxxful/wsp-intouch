@@ -13,34 +13,31 @@ class GlobalPromptTest(TestCase):
 
 
 class ReglasDeCalidadDelPromptTest(TestCase):
-    """Las tres reglas agregadas el 2026-09-03 tras la revisión del vendedor.
+    """Reglas heredadas del prompt de Cavem (bot automotriz), revisadas para
+    InTouch el 2026-09-09.
 
-    Las tres salieron de fallas reales en conversaciones de producción
-    (docs/PENDIENTES.md #18, #20b y #25). Este test no prueba que el LLM las
-    obedezca —eso se verificó aparte contra el modelo real— sino que no
-    desaparezcan del prompt en una edición futura.
+    Se sacaron `test_manda_copiar_el_precio_formateado` y
+    `test_prohibe_preguntar_entre_una_sola_sucursal`: probaban reglas de
+    dominio automotriz (precios de catálogo, sucursales) que este prompt no
+    tiene y que además contradiría -- la sección NUNCA INVENTES de
+    `SYSTEM_PROMPT` le prohíbe explícitamente al bot afirmar un precio. No es
+    cobertura que falte, es dominio que este bot no tiene.
+
+    Queda `test_prohibe_el_voseo_con_las_formas_concretas`: la regla anti-
+    voseo sí aplica igual, sólo cambian las formas concretas que enumera.
     """
 
     def test_prohibe_el_voseo_con_las_formas_concretas(self):
-        # La regla "nunca vos" ya existía y el modelo la violaba igual
-        # ("preferís", "querés", "pensás"). Hicieron falta las formas
-        # explícitas.
+        # La regla "nunca vosees" no alcanza en abstracto: la ley del stack
+        # es que el modelo imita el corpus del prompt, no sólo lo obedece
+        # (ver feedback_el_modelo_imita_su_corpus.md -- un prompt hermano
+        # publicó su regla anti-voseo con el ejemplo "cuentame" sin tilde y
+        # el bot le escribió "cuentame" a un contacto real seis horas
+        # después). Por eso importa que la sección IDIOMA Y ORTOGRAFÍA
+        # enumere pares concretos tuteo/voseo, no sólo la advertencia
+        # general.
         from bot.flow.global_prompt import SYSTEM_PROMPT
-        for forma in ("prefieres", "quieres", "tienes", "puedes", "piensas"):
+        for forma in ("cuéntame", "quieres", "necesitas", "contame", "querés", "necesitás"):
             with self.subTest(forma=forma):
                 self.assertIn(forma, SYSTEM_PROMPT)
-        self.assertIn("voseantes", SYSTEM_PROMPT)
-
-    def test_manda_copiar_el_precio_formateado(self):
-        # El bot cotizó la Subaru XV con el precio del Kia Sportage: tenía el
-        # dato correcto en la tool y lo reescribió mal.
-        from bot.flow.global_prompt import SYSTEM_PROMPT
-        self.assertIn("precio_formateado", SYSTEM_PROMPT)
-        self.assertIn("COPIA ese texto tal cual", SYSTEM_PROMPT)
-
-    def test_prohibe_preguntar_entre_una_sola_sucursal(self):
-        # El bot preguntó "¿cuál sucursal te queda más cerca?" con una sola
-        # sucursal, haciéndole perder un turno al cliente.
-        from bot.flow.global_prompt import SYSTEM_PROMPT
-        self.assertIn("## SUCURSALES", SYSTEM_PROMPT)
-        self.assertIn("motivo_sin_ranking", SYSTEM_PROMPT)
+        self.assertIn("Nunca vosees", SYSTEM_PROMPT)

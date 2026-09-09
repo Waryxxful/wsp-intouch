@@ -5,6 +5,24 @@ credenciales reales. Está en el orden en que conviene resolverlo: el paso 1
 bloquea la Task 3 (no seguir sin resolverlo), los pasos 2 y 3 bloquean tareas
 más adelante en el plan, el paso 4 es el que menos apura.
 
+> **Aclaración sobre `doctor` y el `docker run` efímero (verificada):** al
+> correr `manage.py doctor` con el `docker run` de una sola vez que se usa
+> para los tests (el de `CLAUDE.md`, con `-e` explícitas), reporta como
+> "ausentes" `SUPABASE_URL`, `SUPABASE_KEY`, `GOOGLE_API_KEY` y
+> `PUBLIC_BASE_URL`. **Las cuatro SÍ están en `.env.docker` con valores
+> reales** (ver "Ya resuelto en esta sesión" más abajo). La falla es un
+> artefacto de ese `docker run`: pasa variables explícitas con `-e` y no carga
+> el `env_file` del `docker-compose.yml`, así que ninguna variable que sólo
+> viva en `.env.docker` llega al contenedor efímero. Corrido desde el
+> contenedor real (`docker compose exec web python manage.py doctor`, que sí
+> carga `env_file`), el `doctor` pasa de cinco fallas a **una**:
+> `WHATSAPP_VERIFY_TOKEN=CHANGEME`, que es la credencial de mañana (punto 3).
+> Las otras dos fallas que quedarían — el fixture del prompt y el catálogo de
+> negocio vacío — las cierran el especialista comercial (ya implementado) y
+> `seed_intouch` (punto 5 de `docs/DEPLOY_INTOUCH.md`), no una credencial.
+> Sin esta aclaración, mañana se lee "5 fallas" desde el `docker run` de los
+> tests y parece que el bot está roto cuando no lo está.
+
 ## 1. Login SQL Server `intouch_login_qa` (BLOQUEANTE para la Task 3)
 
 **Por qué es bloqueante:** `DB_SCHEMA` en `.env.docker` es decorativo —

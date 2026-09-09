@@ -24,3 +24,4 @@ archivos/
 .flip_watcher.lock
 db.sqlite3
 db_leads.sqlite3
+.mcp.json

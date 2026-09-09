@@ -4937,7 +4937,17 @@ La ficha de la app, con el formato de las otras siete de `docs-repo/apps/`:
 - **En qué se diferencia del resto del stack**: es el primero no automotriz, y el primero cuyo lead se escribe fuera del camino crítico desde el día uno.
 - **Estado real**, marcando lo objetivo o pendiente como tal.
 
-- [ ] **Step 6: Commit en los dos repos, por separado**
+- [ ] **Step 6: Agregar el bot al mapa de repos**
+
+`/home/admincrm/CLAUDE.md` es el índice que dice dónde está cada cosa, y su tabla de repos no incluye este bot. Agregar la fila:
+
+```markdown
+| `wsp_intouch/` | Bot "Asesor Comercial IA" de InTouch: comercial B2B, lead gen. **Primer bot no automotriz.** Puerto 8040 |
+```
+
+Y en la sección de bots de WhatsApp, dejar dicho que un bot nuevo **automotriz** se clona de `wsp_cavem`, y que uno de **otro rubro** conviene clonarlo de `wsp_intouch`: ahí ya está resuelto lo que cuesta sacar el vertical de autos.
+
+- [ ] **Step 7: Commit en los tres repos, por separado**
 
 ```bash
 cd /home/admincrm/wsp_intouch

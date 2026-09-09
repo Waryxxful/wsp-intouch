@@ -135,11 +135,37 @@ def _registrar_lead_impl(wa_id: str, datos: dict, senales=None) -> dict:
 
     # El score se recalcula SÓLO si este turno trajo señales. Un turno de
     # cortesía sin señales no puede degradar un lead que ya calificó.
+    score_previo = lead.lead_score
     convertidas = _senales_desde(senales)
     if convertidas is not None:
         lead.lead_score = calcular_lead_score(convertidas)
 
+    # Se notifica en la TRANSICIÓN a HOT y se sella con `notificado_en`. Sin el
+    # sello, el equipo comercial recibiría una notificación por cada mensaje que
+    # el contacto siga escribiendo, que es la forma más rápida de que la
+    # apaguen.
+    paso_a_hot = lead.lead_score == "HOT" and score_previo != "HOT" and not lead.notificado_en
+    if paso_a_hot:
+        lead.notificado_en = timezone.now()
+
     lead.save()
+
+    if paso_a_hot:
+        # En su propio try y después del save: el lead ya está guardado, así
+        # que un orquestador caído no puede costarlo. `notificar` tampoco
+        # propaga, pero la defensa vale doble porque acá se decide el sello.
+        try:
+            from bot import notify
+
+            quien = lead.empresa or lead.nombre_completo or wa_id
+            notify.notificar(
+                tipo="lead_hot",
+                mensaje=f"Oportunidad HOT: {quien}. {lead.necesidad_principal or ''}".strip(),
+                url="/wsp/intouch/leads",
+            )
+        except Exception:
+            logger.warning("[lead] no pude notificar el lead HOT de %s", wa_id,
+                           exc_info=True)
 
     resultado = {
         "ok": True,

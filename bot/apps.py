@@ -128,11 +128,14 @@ class BotConfig(AppConfig):
     name = "bot"
 
     def ready(self):
-        from utils.dios_registration import notify_schema_updated, register_with_dios
+        from utils.dios_registration import (
+            notify_schema_updated, register_notify_types, register_with_dios,
+        )
         from bot.scraping.scheduler import start_scheduler
         from bot.seguimiento import start_scheduler as start_seguimiento
         import bot.signals  # noqa: F401
         register_with_dios()
         notify_schema_updated()
+        register_notify_types()
         start_scheduler()
         start_seguimiento()

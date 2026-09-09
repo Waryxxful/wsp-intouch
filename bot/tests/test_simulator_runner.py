@@ -279,12 +279,16 @@ from bot.simulator.models import CorridaDePrueba, EscenarioDePrueba, ResultadoDe
 
 # Modulo de migracion (nombre invalido como identificador Python por el
 # prefijo numerico -- se carga con importlib, igual que Django lo hace
-# internamente) -- reusa la MISMA lista ESCENARIOS_SEMILLA que usa la
-# migracion real, en vez de duplicarla a mano en este archivo de test (ver
-# EjecutarCorridaTest._fixture_teardown mas abajo).
+# internamente) -- reusa la MISMA funcion de siembra que usa la migracion
+# real (la ULTIMA que puebla la tabla, no una intermedia: 0002_seed_escenarios
+# sembraba los 8 escenarios automotrices heredados de wsp_cavem, que
+# 0003_escenarios_intouch borro; apuntar aca a 0002 resucitaria esos 8 en
+# cada _fixture_teardown de EjecutarCorridaTest, silenciosamente, para el
+# resto de la sesion de test) en vez de duplicarla a mano en este archivo de
+# test (ver EjecutarCorridaTest._fixture_teardown mas abajo).
 _seed_escenarios = importlib.import_module(
-    "bot.simulator.migrations.0002_seed_escenarios",
-).seed_escenarios
+    "bot.simulator.migrations.0003_escenarios_intouch",
+).poblar_escenarios_intouch
 
 
 class IniciarCorridaTest(TestCase):
@@ -298,8 +302,8 @@ class IniciarCorridaTest(TestCase):
     def test_sin_escenarios_activos_lanza_value_error_sin_crear_corrida(self):
         from bot.simulator.runner import iniciar_corrida
 
-        # La migracion 0002_seed_escenarios (ver
-        # bot/tests/test_simulator_seed_migration.py) siembra 8 escenarios
+        # La migracion 0003_escenarios_intouch (ver
+        # bot/tests/test_simulator_seed_migration.py) siembra escenarios
         # activos en TODA BD de test -- se desactivan aca para que este test
         # pruebe genuinamente el caso "cero escenarios activos", no un
         # artefacto de la semilla.
@@ -344,8 +348,8 @@ class EjecutarCorridaTest(TransactionTestCase):
     _fixture_teardown() de mas abajo deja que Django haga su flush()
     normal (que SI recrea content types/permisos via la señal
     post_migrate, sin pisar nada) y solo reinserta la semilla propia de
-    este dominio (los 8 EscenarioDePrueba de la migracion
-    0002_seed_escenarios) despues -- sin la cual test_simulator_seed_migration.py
+    este dominio (los EscenarioDePrueba de la migracion
+    0003_escenarios_intouch) despues -- sin la cual test_simulator_seed_migration.py
     encontraria la tabla vacia para el resto de la sesion de test."""
 
     def _fixture_teardown(self):
@@ -353,7 +357,7 @@ class EjecutarCorridaTest(TransactionTestCase):
         _seed_escenarios(django_apps, None)
 
     def setUp(self):
-        # Mismo motivo que en IniciarCorridaTest: neutraliza los 8
+        # Mismo motivo que en IniciarCorridaTest: neutraliza los
         # escenarios semilla para que "cada escenario activo" signifique
         # solo e1/e2 en estos tests.
         EscenarioDePrueba.objects.update(activo=False)

@@ -100,21 +100,33 @@ def _partir_saludo(texto: str) -> tuple[bool, str]:
 # unas llaves sueltas no deben reventar la respuesta.
 #
 # El texto anterior era "¡Hola! ¿En qué le puedo ayudar?", que trataba de USTED
-# y violaba la regla de tuteo del prompt global, ademas de no identificarse
-# como Auto IA. Aprobado por el usuario el 2026-09-02.
+# y violaba la regla de tuteo del prompt global. Aprobado por el usuario el
+# 2026-09-02 y reescrito para InTouch.
 # La bienvenida son DOS piezas, y se manda una o las dos segun el caso:
 #
-#   "hola"                       -> identidad + invitacion (es toda la respuesta)
-#   "hola quiero cotizar una suv" -> SOLO identidad, y el grafo responde el resto
+#   "hola"                          -> identidad + invitacion (es toda la respuesta)
+#   "hola, necesito ordenar mi WhatsApp" -> SOLO identidad, y el grafo responde el resto
 #
 # La invitacion ("¿en que te puedo ayudar?") es redundante cuando ya viene una
 # respuesta real detras: le pregunta al contacto algo que acaba de decir.
+#
+# LA INVITACION ES EL PRIMER MENSAJE QUE LEE UN PROSPECTO. Heredada del bot
+# automotriz, ofrecia "stock de usados", "simular un financiamiento" y "agendar
+# una hora en el taller": tres capacidades que este catalogo no tiene y que
+# ninguna tool puede cumplir. Ahora orienta sobre los dominios que InTouch si
+# atiende, en los mismos terminos que el catalogo (contactabilidad, experiencia
+# de cliente, Contact Center, automatizacion, agentes con IA y analitica), sin
+# comprometer una solucion puntual: eso lo decide el especialista despues de
+# consultar el catalogo. Va en espanol correcto con tildes -- es corpus, y es lo
+# primero que ve un contacto real.
 WELCOME_IDENTIDAD = (
     "¡Hola{nombre}! Soy el asistente virtual comercial de InTouch 👋"
 )
 WELCOME_INVITACION = (
-    "¿En qué te puedo ayudar? Puedo mostrarte nuestro stock de usados, "
-    "simular un financiamiento o agendar una hora en el taller."
+    "¿En qué te puedo ayudar? En InTouch trabajamos la contactabilidad y la "
+    "experiencia de cliente: operación de Contact Center, agentes "
+    "conversacionales con IA, automatización de la atención y analítica de las "
+    "conversaciones. Cuéntame qué necesitas resolver y lo vemos."
 )
 
 
@@ -140,7 +152,8 @@ _CORTESIA_APERTURA = {
     "de", "nuevo", "otra", "vez", "encantado", "encantada", "gusto", "mucho",
     "bienvenido", "bienvenida", "un", "una", "el", "la", "y", "aqui", "aca",
     "estoy", "para", "ayudarte", "servirte", "soy", "auto", "ia", "asistente",
-    "virtual", "intouch", "in-touch", "todo", "bien", "espero", "te", "en",
+    "virtual", "comercial", "intouch", "in-touch", "todo", "bien", "espero",
+    "te", "en",
 }
 
 

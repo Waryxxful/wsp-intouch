@@ -6,6 +6,7 @@ WhatsApp -- caía al LLM y costaba 11,2s. Y cuando sí interceptaba, respondía
 con "¿En qué le puedo ayudar?", tratando de USTED, en contra de la regla de
 tuteo del prompt global. Ver docs/PENDIENTES.md #15.
 """
+import re
 from unittest.mock import patch
 
 from django.test import TestCase, TransactionTestCase
@@ -80,12 +81,56 @@ class TextoBienvenidaTest(TestCase):
         self.assertIn("te puedo ayudar", WELCOME_INVITACION.lower())
         self.assertNotIn("le puedo ayudar", WELCOME_INVITACION.lower())
 
-    def test_la_identidad_se_presenta_como_auto_ia(self):
-        # IDENTIDAD del prompt global: el nombre es "Auto IA" en todos los
-        # especialistas, y declara que es un asistente virtual.
+    def test_la_identidad_se_presenta_como_el_asistente_de_intouch(self):
+        # Este test pedía "Auto IA" -- la identidad del bot automotriz del que
+        # se copió el árbol -- y quedó en rojo cuando la Task 9 rebrandeó la
+        # bienvenida. Lo que se adapta es la expectativa, no el código: el
+        # prompt global de este bot ya no puede decir "Auto IA" (lo prohíbe
+        # `test_prompt_global_intouch.test_no_queda_rastro_de_la_identidad_vieja`),
+        # así que la bienvenida tampoco. Se mantiene lo que la regla de IDENTIDAD
+        # sí exige y no depende de la marca: declararse asistente virtual y
+        # decir de quién es.
         texto = _texto_bienvenida(WELCOME_IDENTIDAD, "Tomas")
-        self.assertIn("Auto IA", texto)
+        self.assertIn("InTouch", texto)
         self.assertIn("virtual", texto)
+        self.assertNotIn("Auto IA", texto)
+
+    def test_la_invitacion_no_ofrece_capacidades_del_bot_automotriz(self):
+        # ES EL PRIMER MENSAJE QUE LEE QUIEN ESCRIBE "hola", y venía heredado:
+        # ofrecía "stock de usados", "simular un financiamiento" y "agendar una
+        # hora en el taller". Ninguna tool de este bot puede cumplir ninguna de
+        # las tres, y `seed_intouch` no siembra el Setting que lo taparía.
+        texto = WELCOME_INVITACION.lower()
+        # Palabra completa y no subcadena: "auto" vive dentro de
+        # "automatización", que es justamente una de las cosas que InTouch sí
+        # hace.
+        for prohibido in ("usados", "financiamiento", "taller", "stock",
+                          "vehículo", "vehiculo", "auto", "autos"):
+            with self.subTest(prohibido=prohibido):
+                self.assertIsNone(re.search(rf"\b{prohibido}\b", texto))
+
+    def test_la_invitacion_orienta_sobre_lo_que_intouch_hace(self):
+        # No basta con sacar lo automotriz: el contacto tiene que saber sobre
+        # qué puede preguntar. Los términos son los del catálogo (spec §5.1),
+        # no capacidades inventadas.
+        texto = WELCOME_INVITACION.lower()
+        self.assertIn("contact center", texto)
+        for palabra in ("contactabilidad", "experiencia de cliente",
+                        "agentes conversacionales"):
+            with self.subTest(palabra=palabra):
+                self.assertIn(palabra, texto)
+
+    def test_la_invitacion_va_con_tildes(self):
+        # Es corpus: lo primero que lee un contacto real y lo que el modelo ve
+        # en el historial del turno siguiente. Un ejemplo sin tilde en el
+        # corpus ya le enseñó a este stack a escribir sin tildes.
+        for con_tilde, sin_tilde in (("qué", "que te puedo"),
+                                     ("automatización", "automatizacion"),
+                                     ("analítica", "analitica"),
+                                     ("operación", "operacion")):
+            with self.subTest(palabra=con_tilde):
+                self.assertIn(con_tilde, WELCOME_INVITACION.lower())
+                self.assertNotIn(sin_tilde, WELCOME_INVITACION.lower())
 
     def test_la_identidad_no_incluye_la_invitacion(self):
         # Son piezas separadas a propósito: cuando viene una respuesta real

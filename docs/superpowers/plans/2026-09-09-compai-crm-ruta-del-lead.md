@@ -4027,7 +4027,7 @@ def _respuesta(cuerpo, status=201, content_type="application/json"):
 
 
 @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/api/ingest/intouch-lead",
-                   LEAD_SINK_TOKEN="crm_prueba")
+                   LEAD_SINK_TOKEN="secreto_prueba")
 class RespuestaTest(TestCase):
     def _enviar(self, resp):
         with patch("urllib.request.urlopen", return_value=resp):
@@ -4076,18 +4076,20 @@ class RespuestaTest(TestCase):
                 {"status": "created", "contactId": "c1", "dealId": None})
             _enviar_al_sink({"origen": "wsp_intouch"})
         peticion = abrir.call_args[0][0]
-        self.assertEqual(peticion.get_header("X-api-key"), "crm_prueba")
+        # El header de ingesta, no el de API key del CRM. Ver el comentario en
+        # `_enviar_al_sink`: confundirlos le devuelve al bot acceso total.
+        self.assertEqual(peticion.get_header("X-intouch-ingest-key"), "secreto_prueba")
 
     def test_el_token_no_aparece_en_los_logs(self):
         with self.assertLogs("bot.business.lead_intouch", level="DEBUG") as registro:
             with patch("urllib.request.urlopen", side_effect=RuntimeError("caido")):
                 conv = Conversation.objects.create(wa_id="56900000030")
                 _registrar_lead_impl("56900000030", {"empresa": "Acme SpA"})
-        self.assertNotIn("crm_prueba", "\n".join(registro.output))
+        self.assertNotIn("secreto_prueba", "\n".join(registro.output))
 
 
 @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/api/ingest/intouch-lead",
-                   LEAD_SINK_TOKEN="crm_prueba")
+                   LEAD_SINK_TOKEN="secreto_prueba")
 class SelloTest(TestCase):
     def setUp(self):
         Conversation.objects.create(wa_id="56900000031")
@@ -4130,8 +4132,14 @@ LEAD_SINK_TOKEN = os.environ.get("LEAD_SINK_TOKEN", "")
 En `.env.docker.example`, junto a `LEAD_SINK_URL`:
 
 ```bash
-# Con LEAD_SINK=http: el endpoint del CRM y su API key. La URL se resuelve
-# desde la red del contenedor (crm_ingest), no desde el host.
+# Con LEAD_SINK=http: el endpoint del receptor y su secreto de ingesta. La URL
+# se resuelve desde la red del contenedor (crm_ingest), no desde el host.
+#
+# El nombre de la variable es agnóstico del destino A PROPÓSITO, y se queda
+# así: el destino es conmutable por diseño (LEAD_SINK=none|http), así que si
+# mañana el lead va a otro receptor con otro esquema de autenticación, la
+# variable sigue sirviendo y lo único que cambia es el header. Renombrarla a
+# algo con "ingest" o "crm" la ataría a este destino en particular.
 # LEAD_SINK_URL=http://crm-api:3001/api/ingest/intouch-lead
 LEAD_SINK_TOKEN=
 ```
@@ -4188,7 +4196,18 @@ def _enviar_al_sink(payload: dict) -> dict | None:
     cabeceras = {"Content-Type": "application/json"}
     token = getattr(settings, "LEAD_SINK_TOKEN", "")
     if token:
-        cabeceras["x-api-key"] = token
+        # `x-intouch-ingest-key` y NO `x-api-key`: esto NO es una API key del
+        # framework del CRM, es un secreto de ingesta que verifica un guard que
+        # corre sólo en /api/ingest.
+        #
+        # El motivo está medido (2026-09-10): una API key de Better Auth en esa
+        # instalación abre TODA la API -- lee contactos, empresas y
+        # oportunidades, y crea contactos -- porque se crean sin `permissions` y
+        # `enableSessionForAPIKeys` las vuelve equivalentes a su usuario dueño.
+        # Chequearla en un endpoint no limita las otras rutas. Si alguien
+        # "corrige" esto de vuelta a x-api-key, le devuelve al bot acceso de
+        # lectura y escritura a todo el CRM.
+        cabeceras["x-intouch-ingest-key"] = token
     else:
         logger.warning("[lead] LEAD_SINK_TOKEN está vacío: el receptor va a rechazar")
 
@@ -4373,7 +4392,7 @@ def _lead(wa_id, **kwargs):
 
 
 @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x",
-                   LEAD_SINK_TOKEN="crm_prueba")
+                   LEAD_SINK_TOKEN="secreto_prueba")
 class PendientesTest(TestCase):
     def test_despacha_el_que_quedo_sin_sellar(self):
         _lead("56900000040", empresa="Acme SpA")

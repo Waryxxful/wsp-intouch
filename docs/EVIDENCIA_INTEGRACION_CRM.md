@@ -128,6 +128,25 @@ por una corrección:
 El resultado combinado es mejor que lo planeado: **las dos ramas del emisor
 observadas contra el receptor real**, creación y replay.
 
+### Procedencia de cada observación
+
+La primera versión de este grupo mezclaba lo observado con lo reportado, y de
+ahí salió el error de D01. **En un documento de evidencia, lo que reporta otra
+sesión se anota como reporte, no como observación propia** — si no, la cadena
+de verificación se rompe justo en el eslabón que parece verificado y no lo
+está. Entonces:
+
+| Marca | Significa |
+|---|---|
+| **(obs.)** | Observado directamente en los logs de `crm-api` o consultando la base del CRM |
+| **(rep.)** | Reportado por la sesión del emisor. No verificable desde acá: `QAIntouch` y el estado interno de `LeadInTouch` son de su lado |
+
+Lo que **no** se puede verificar desde el receptor, y por eso va como reporte:
+que el emisor sellara `crm_contact_id`/`crm_deal_id`, que su tabla volviera a
+cero, y cuál de sus dos funciones originó cada petición. Lo que sí se observa
+desde acá es que las peticiones llegaron, con qué código y en qué tiempo, y qué
+quedó escrito en el CRM.
+
 Lo que destapó la imprecisión fue el `200` de 15,3 ms del que nadie esperaba —
 o sea que un dato inesperado en el log fue el síntoma de que la secuencia no
 probaba lo que se afirmaba.
@@ -139,15 +158,15 @@ Fixture, elegido para que no pueda confundirse con nada real: teléfono
 
 | ID | Prueba | Esperado | Observado | Estado |
 |---|---|---|---|---|
-| D01 | Lead del emisor → pipeline, por `_enviar_al_sink` | 201 con los tres ids | Corrida 1: `201` en 197,5 ms, `status: created`. El emisor selló esos ids | **PASS** |
-| D01b | **Creación por el camino de producción** (`_despachar_si_corresponde`, sin llamada manual) | 201 con ids nuevos | Corrida 2: `201` en **158,4 ms**, `contactId=cmtviiu8r…`, `dealId=cmtviiu8z…` — ids distintos de la corrida 1, así que fue creación y no replay. Sellados en `crm_contact_id`/`crm_deal_id` | **PASS** |
+| D01 | Lead del emisor → pipeline, por `_enviar_al_sink` | 201 con los tres ids | **(obs.)** `201` en 197,5 ms, `status: created`, y las tres filas en el CRM. **(rep.)** que la petición vino de la llamada manual y que el emisor selló esos ids | **PASS** |
+| D01b | **Creación por el camino de producción** (`_despachar_si_corresponde`, sin llamada manual) | 201 con ids nuevos | **(obs.)** `201` en **158,4 ms** con `contactId=cmtviiu8r…` y `dealId=cmtviiu8z…`, ids distintos de la corrida 1 — así que fue creación y no replay. **(rep.)** que esa petición salió del camino de producción sin llamada manual previa, y que se sellaron | **PASS** |
 | D02 | Los 22 campos preservados | Todos presentes | **14/14** campos dinámicos + los 8 nativos. `usa_ia_actualmente = true` (booleano real). `solicita_*` como dos `TASK` con vencimiento, resumen y siguiente acción en la `NOTE` | **PASS** |
 | D03 | Etapa y dueño | `QUALIFIED_TO_BUY`, dueño configurado | `QUALIFIED_TO_BUY`, `tomasvalenzuela@in-touchcrm.cl` | **PASS** |
-| D04 | **Replay por el camino de producción** | 200, sin efectos | Corrida 1: `200` en **15,3 ms** contra los 197,5 de la creación — 13× más rápido porque sale en el chequeo de estado sin resolver identidad ni escribir. 1 contacto, 1 oportunidad | **PASS** |
+| D04 | **Replay por el camino de producción** | 200, sin efectos | **(obs.)** `200` en **15,3 ms** contra los 197,5 de la creación — 13× más rápido — y 1 contacto y 1 oportunidad en total, sin duplicados. **(rep.)** que esa segunda petición fue del camino de producción | **PASS** |
 | D05 | Array estructurado | Reconstruible | `["whatsapp","voz","email"]` íntegro en `payload` | **PASS** |
 | D06 | El emisor usa `urllib`, no `requests` | stdlib | `userAgent: Python-urllib/3.11` | **PASS** |
 | D07 | Dominio reservado no crea empresa por dominio | `domain: null` | `null` — `domainFromEmail` de upstream rechaza `.invalid` por su lista de sufijos de máquina | **PASS** |
-| D08 | Limpieza de los datos de prueba, las dos corridas | Cero en las dos bases | `QAIntouch`: 0 conversaciones, 0 leads. CRM: 0 contactos, 0 empresas, 0 oportunidades, 0 actividades. Borrado por los ids del evento, nunca por prefijo | **PASS** |
+| D08 | Limpieza de los datos de prueba, las dos corridas | Cero en las dos bases | **(obs.)** CRM en 0 contactos, 0 empresas, 0 oportunidades, 0 actividades y 0 eventos, borrado por los ids del evento y nunca por prefijo. **(rep.)** `QAIntouch` en 0 conversaciones y 0 leads | **PASS** |
 | D09 | Conversación real de WhatsApp | — | **NO EJECUTADO** — credenciales de Meta, y el traspaso del número es un despliegue con el usuario |
 
 **D04 no estaba en el plan de la prueba, y su valor fue doble.** Además de

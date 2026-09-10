@@ -1065,6 +1065,15 @@ class LeadInTouch(models.Model):
         default=0,
         help_text="Orden de los eventos de este lead. Sólo avanza.")
 
+    crm_contact_id = models.CharField(
+        max_length=40, blank=True, default="",
+        help_text="Id del contacto en el CRM, como lo devolvió el receptor. "
+                  "Es lo que permite ir del lead a su ficha sin adivinar.")
+    crm_deal_id = models.CharField(
+        max_length=40, blank=True, default="",
+        help_text="Id de la oportunidad, si la política del CRM abrió una. "
+                  "Vacío es válido: un lead frío entra como contacto sin oportunidad.")
+
     class Meta:
         ordering = ["-actualizado"]
 

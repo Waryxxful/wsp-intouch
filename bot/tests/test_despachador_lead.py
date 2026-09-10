@@ -32,14 +32,15 @@ class EncendidoTest(TestCase):
         Conversation.objects.create(wa_id="56900000011")
 
     def test_despacha_y_sella(self):
-        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=True):
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"status": "created", "contactId": "c1", "dealId": None}):
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertIsNotNone(LeadInTouch.objects.get().despachado_en)
 
     def test_un_fallo_deja_el_lead_sin_sellar_para_reintentarlo(self):
         # Un lead sin despachar tiene que ser VISIBLE: el sello es la única
         # forma de saber cuáles quedaron afuera.
-        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=False):
+        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=None):
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertIsNone(LeadInTouch.objects.get().despachado_en)
 
@@ -50,11 +51,26 @@ class EncendidoTest(TestCase):
         self.assertTrue(resultado["ok"])
         self.assertEqual(LeadInTouch.objects.get().empresa, "Acme SpA")
 
-    def test_no_despacha_dos_veces_el_mismo_lead(self):
-        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=True) as enviar:
+    def test_no_despacha_dos_veces_el_mismo_contenido(self):
+        # Antes este test afirmaba que dos escrituras dan UN despacho. Con
+        # evento_id eso cambio a proposito: la segunda escritura de abajo NO
+        # cambia el contenido, y por eso no hay segundo despacho. Un cambio
+        # real si tiene que despacharse -- es una actualizacion comercial, no
+        # un reintento.
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"status": "created", "contactId": "c1",
+                                 "dealId": None}) as enviar:
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
-            _registrar_lead_impl("56900000011", {"cargo": "Gerente"})
+            _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertEqual(enviar.call_count, 1)
+
+    def test_un_cambio_real_si_se_despacha_otra_vez(self):
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"status": "updated", "contactId": "c1",
+                                 "dealId": None}) as enviar:
+            _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
+            _registrar_lead_impl("56900000011", {"cargo": "Gerenta"})
+        self.assertEqual(enviar.call_count, 2)
 
     def test_un_sink_desconocido_no_despacha_y_deja_ruido(self):
         with override_settings(LEAD_SINK="ftp"):

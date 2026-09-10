@@ -363,27 +363,88 @@ def payload_del_lead(lead) -> dict:
     return payload
 
 
-def _enviar_al_sink(payload: dict) -> bool:
-    """POST al endpoint configurado. True si el receptor lo aceptó.
+# Los estados de respuesta que el receptor puede devolver y que significan
+# "el lead está en el CRM". Explícito y no "cualquier 2xx": un 2xx con un
+# cuerpo incompleto es un fallo de contrato, no un éxito.
+_ESTADOS_DE_EXITO = frozenset({"created", "replayed", "updated"})
+
+
+def _enviar_al_sink(payload: dict) -> dict | None:
+    """POST al receptor. Devuelve su cuerpo si aceptó el lead, None si no.
+
+    ANTES DEVOLVÍA UN BOOLEANO MIRANDO SÓLO EL CÓDIGO HTTP, y eso convertía
+    tres fallas distintas en éxito: un 2xx con el cuerpo vacío, un redirect a
+    una página de login (que llega como 200 con HTML) y un JSON roto. Un
+    `raise_for_status` exitoso no prueba que el lead esté en el pipeline.
 
     stdlib `urllib` y no `requests`, que no está en requirements -- mismo
     criterio que bot/notify.py y utils/dios_registration.py.
     """
     import json
+    import urllib.error
     import urllib.request
 
     destino = getattr(settings, "LEAD_SINK_URL", "")
     if not destino:
         logger.warning("[lead] LEAD_SINK=http pero LEAD_SINK_URL está vacío")
-        return False
+        return None
+
+    cabeceras = {"Content-Type": "application/json"}
+    token = getattr(settings, "LEAD_SINK_TOKEN", "")
+    if token:
+        # NO es una API key del framework de autenticación del CRM -- esas
+        # equivalen a su usuario dueño (leen y crean contactos, empresas y
+        # oportunidades). Este es un secreto de ingesta dedicado, validado
+        # por un guard que corre sólo en esta ruta. No "corregir" a x-api-key.
+        cabeceras["x-intouch-ingest-key"] = token
+    else:
+        logger.warning("[lead] LEAD_SINK_TOKEN está vacío: el receptor va a rechazar")
+
     req = urllib.request.Request(
         destino, data=json.dumps(payload).encode("utf-8"),
-        headers={"Content-Type": "application/json"}, method="POST")
-    with urllib.request.urlopen(req, timeout=10) as resp:
-        # Se verifica el CÓDIGO, no que el POST se haya completado. Un
-        # despachador que devuelve éxito para un HTTP de error convierte un
-        # fallo en "no había datos" -- la falla de §IV.1 que este stack ya pagó.
-        return 200 <= resp.status < 300
+        headers=cabeceras, method="POST")
+
+    try:
+        with urllib.request.urlopen(req, timeout=15) as resp:
+            crudo = resp.read()
+            status_http = resp.status
+            tipo = (resp.headers.get("Content-Type") or "").lower()
+    except urllib.error.HTTPError as error:
+        # 4xx y 5xx llegan acá. El motivo se loguea, el cuerpo del error no:
+        # puede traer detalle interno del receptor.
+        logger.warning("[lead] el receptor respondió %s", error.code)
+        return None
+
+    if not (200 <= status_http < 300):
+        logger.warning("[lead] el receptor respondió %s", status_http)
+        return None
+
+    if "json" not in tipo:
+        # El síntoma de un redirect a login: 200 con HTML.
+        logger.warning("[lead] el receptor respondió %s en vez de JSON", tipo or "sin tipo")
+        return None
+
+    try:
+        cuerpo = json.loads(crudo)
+    except (ValueError, TypeError):
+        logger.warning("[lead] el receptor respondió un JSON que no se puede leer")
+        return None
+
+    if not isinstance(cuerpo, dict):
+        logger.warning("[lead] el receptor respondió algo que no es un objeto")
+        return None
+
+    if cuerpo.get("status") not in _ESTADOS_DE_EXITO:
+        logger.warning("[lead] el receptor respondió status=%r", cuerpo.get("status"))
+        return None
+
+    if not cuerpo.get("contactId"):
+        # `dealId` vacío SÍ es válido (un lead frío no abre oportunidad), pero
+        # sin contacto no hay nada en el CRM que mirar.
+        logger.warning("[lead] el receptor no devolvió contactId")
+        return None
+
+    return cuerpo
 
 
 def _despachar_si_corresponde(wa_id: str) -> None:
@@ -401,15 +462,24 @@ def _despachar_si_corresponde(wa_id: str) -> None:
             "[lead] LEAD_SINK=%r no es un destino conocido (%s): el lead no se despacha",
             sink, ", ".join(sorted(SINKS_VALIDOS)))
         return
-    lead = LeadInTouch.objects.filter(
-        conversation__wa_id=wa_id, despachado_en__isnull=True).first()
+    lead = LeadInTouch.objects.filter(conversation__wa_id=wa_id).first()
     if lead is None:
         return
     try:
-        if _enviar_al_sink(payload_del_lead(lead)):
+        hay_evento_nuevo = marcar_evento(lead)
+        # Sin contenido nuevo Y ya sellado, no hay nada que despachar: es un
+        # reintento del mismo hecho, no una actualización. Pero si el sello
+        # sigue vacío (el intento anterior falló, o nunca hubo uno) hay que
+        # reintentar aunque el contenido sea el mismo -- ver el docstring.
+        if not hay_evento_nuevo and lead.despachado_en is not None:
+            return
+        respuesta = _enviar_al_sink(payload_del_lead(lead))
+        if respuesta is not None:
             lead.despachado_en = timezone.now()
-            lead.save(update_fields=["despachado_en"])
+            lead.crm_contact_id = respuesta.get("contactId") or ""
+            lead.crm_deal_id = respuesta.get("dealId") or ""
+            lead.save(update_fields=["despachado_en", "crm_contact_id", "crm_deal_id"])
         else:
-            logger.warning("[lead] el destino externo rechazó el lead de %s", wa_id)
+            logger.warning("[lead] el destino externo no aceptó el lead de %s", wa_id)
     except Exception:
         logger.warning("[lead] no pude despachar el lead de %s", wa_id, exc_info=True)

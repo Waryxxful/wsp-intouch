@@ -306,6 +306,14 @@ LOGGING = {
 LEAD_SINK = os.environ.get("LEAD_SINK", "none")
 LEAD_SINK_URL = os.environ.get("LEAD_SINK_URL", "")
 
+# Credencial de integración del receptor. El nombre es agnóstico del destino
+# a propósito -- el destino es conmutable (ver LEAD_SINK) -- y NO es una API
+# key del framework de autenticación del CRM: esas equivalen a su usuario
+# dueño (leen y crean contactos/empresas/oportunidades). Este es un secreto
+# de ingesta dedicado, validado por un guard que corre sólo en esa ruta.
+# Fuera del código y fuera de los logs.
+LEAD_SINK_TOKEN = os.environ.get("LEAD_SINK_TOKEN", "")
+
 # Cuenta de GranCRM a la que se notifican los leads HOT. Sin esto, bot/notify.py
 # loguea un aviso y no notifica -- mismo comportamiento que wsp_pompeyo.
 GRANCRM_TENANT_SLUG = os.environ.get("GRANCRM_TENANT_SLUG", "")

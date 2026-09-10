@@ -267,3 +267,63 @@ class DispatchMediaFallbackTest(TestCase):
         mock_handle_message.assert_called_once_with(
             "56911112222", "Juan", "Se ve un Renault Kwid rojo", "wamid.img1", media_url="abc123.jpg"
         )
+
+
+@override_settings(WEBHOOK_INTERNAL_TOKEN="token-de-prueba")
+class InternalWebhookTokenTest(TestCase):
+    """La ruta interna la llama el dispatcher, no Meta: no hay firma que
+    validar, asi que el unico control es este token."""
+
+    def setUp(self):
+        self.client = Client()
+        self.body = b'{"entry": []}'
+
+    @patch("bot.whatsapp.webhooks._dispatch")
+    def test_token_correcto_despacha(self, mock_dispatch):
+        response = self.client.post(
+            "/internal/webhook",
+            data=self.body,
+            content_type="application/json",
+            HTTP_X_INTERNAL_TOKEN="token-de-prueba",
+        )
+        self.assertEqual(response.status_code, 200)
+        mock_dispatch.assert_called_once()
+
+    @patch("bot.whatsapp.webhooks._dispatch")
+    def test_token_incorrecto_devuelve_403_y_no_despacha(self, mock_dispatch):
+        response = self.client.post(
+            "/internal/webhook",
+            data=self.body,
+            content_type="application/json",
+            HTTP_X_INTERNAL_TOKEN="token-equivocado",
+        )
+        self.assertEqual(response.status_code, 403)
+        mock_dispatch.assert_not_called()
+
+    @patch("bot.whatsapp.webhooks._dispatch")
+    def test_sin_header_devuelve_403_y_no_despacha(self, mock_dispatch):
+        response = self.client.post(
+            "/internal/webhook",
+            data=self.body,
+            content_type="application/json",
+        )
+        self.assertEqual(response.status_code, 403)
+        mock_dispatch.assert_not_called()
+
+
+@override_settings(WEBHOOK_INTERNAL_TOKEN="")
+class InternalWebhookSinTokenConfiguradoTest(TestCase):
+    """Falla cerrado. La alternativa natural -- "si no hay token configurado,
+    no validar" -- convierte un deploy con la variable olvidada en un endpoint
+    abierto sin ningun sintoma."""
+
+    @patch("bot.whatsapp.webhooks._dispatch")
+    def test_setting_vacio_devuelve_503_y_no_despacha(self, mock_dispatch):
+        response = Client().post(
+            "/internal/webhook",
+            data=b'{"entry": []}',
+            content_type="application/json",
+            HTTP_X_INTERNAL_TOKEN="lo-que-sea",
+        )
+        self.assertEqual(response.status_code, 503)
+        mock_dispatch.assert_not_called()

@@ -155,6 +155,13 @@ WHATSAPP_TOKEN = os.environ.get("WHATSAPP_TOKEN", "")
 WHATSAPP_PHONE_ID = os.environ.get("WHATSAPP_PHONE_ID", "")
 WHATSAPP_VERIFY_TOKEN = os.environ.get("WHATSAPP_VERIFY_TOKEN", "CHANGEME")
 WHATSAPP_APP_SECRET = os.environ.get("WHATSAPP_APP_SECRET", "")
+
+# Secreto compartido con el dispatcher de webhook (wsp_webhook_intouch). La
+# ruta /internal/webhook no recibe la firma de Meta -- el dispatcher ya la
+# valido y no la reenvia -- asi que este token es su unico control de acceso.
+# Sin default: si falta, la vista responde 503 en vez de quedar abierta.
+WEBHOOK_INTERNAL_TOKEN = os.environ.get("WEBHOOK_INTERNAL_TOKEN", "")
+
 WHATSAPP_API_VERSION = os.environ.get("WHATSAPP_API_VERSION", "v22.0")
 WHATSAPP_API_BASE = "https://graph.facebook.com"
 

@@ -142,6 +142,26 @@ def webhook(request):
 @csrf_exempt
 @require_http_methods(["POST"])
 def internal_webhook(request):
+    """Entrada del dispatcher de webhook, no de Meta. Meta firma sus pedidos y
+    el dispatcher valida esa firma, pero NO la reenvia -- asi que aca el unico
+    control es el token compartido. Falla cerrado a proposito: sin token
+    configurado esto responde 503, porque un deploy que se olvido la variable
+    tiene que romper fuerte y no quedar abierto en silencio."""
+    esperado = settings.WEBHOOK_INTERNAL_TOKEN
+    if not esperado:
+        logger.error(
+            "WEBHOOK_INTERNAL_TOKEN no esta configurado: /internal/webhook "
+            "rechaza todo hasta que se setee. Ver manage.py doctor."
+        )
+        return JsonResponse(
+            {"error": "webhook interno sin token configurado"}, status=503
+        )
+
+    recibido = request.headers.get("X-Internal-Token", "")
+    if not hmac.compare_digest(recibido, esperado):
+        logger.warning("POST a /internal/webhook con token invalido o ausente")
+        return HttpResponseForbidden("token interno invalido")
+
     data = json.loads(request.body or "{}")
     _dispatch(data)
     return JsonResponse({"status": "ok"})

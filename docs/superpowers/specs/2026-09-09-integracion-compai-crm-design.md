@@ -319,6 +319,31 @@ cambio de esta entrega.
 
 ---
 
+### 2.5 — Compromiso de contrato con el emisor **[nuevo]**
+
+El emisor clasifica **por el código HTTP**, no por el `status` del cuerpo — es
+una decisión suya y es la correcta: el código es transporte y no se rompe si
+acá se renombra un estado o se agrega un motivo. Entonces el receptor se
+compromete a esta partición, y **no se cambia sin avisarle**:
+
+| Código | Significado para el emisor |
+|---|---|
+| `2xx` | Llegó. Sellar y no reintentar |
+| `4xx` salvo `429` | **No se arregla reintentando.** Necesita intervención: una persona, o un cambio en lo que se manda |
+| `429` y `5xx` | **Transitorio.** Reintentar con el mismo `evento_id` |
+
+De ahí sale que un dueño de leads sin configurar responde **503 y no 409**: es
+configuración faltante del receptor, se arregla sola al configurarla, y el lead
+tiene que seguir reintentándose mientras tanto. Y de ahí sale también que una
+credencial inválida no puede terminar en 500 — ver §6.1.
+
+Un matiz para el etiquetado del panel del bot: los dos casos de `409` **no son
+lo mismo**. `conflict` es identidad ambigua y sí necesita una persona (§2.3, y
+la operación de resolución del receptor). `stale` significa que el CRM ya tiene
+una revisión más nueva de ese contacto: tampoco se arregla reintentando, pero
+no hay nada que resolver — lo que corresponde es que el emisor deje de
+intentar, no que alguien intervenga.
+
 ## 3. Los 22 campos, sin pérdida
 
 **Nativos** (8): `nombre_completo` → `Contact.firstName`/`lastName` ·

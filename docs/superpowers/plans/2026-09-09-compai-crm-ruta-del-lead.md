@@ -4263,8 +4263,24 @@ def _enviar_al_sink(payload: dict) -> dict | None:
 Reemplazar el bloque `try` por:
 
 ```python
+    hay_evento_nuevo = marcar_evento(lead)
+    # LA GUARDA, y sin ella este paso tenía un bug: llamando a
+    # `_enviar_al_sink` incondicionalmente, un lead ya sellado y sin cambios se
+    # re-despacha, y el propio test `test_no_despacha_dos_veces_el_mismo_contenido`
+    # falla con 2 llamadas en vez de 1.
+    #
+    # Los tres casos, y el segundo es el que importa:
+    #   contenido nuevo            -> despacha (es una revisión nueva)
+    #   sin cambios y SIN sellar   -> despacha (es el reintento de un fallo)
+    #   sin cambios y ya sellado   -> no despacha (nada nuevo, ya llegó)
+    #
+    # El segundo caso es la vía por la que entra el barrido de la Task 12: si
+    # "sin cambios" cortara siempre, un lead que falló el envío no se
+    # reintentaría nunca, porque su contenido no cambia.
+    if not hay_evento_nuevo and lead.despachado_en is not None:
+        return
+
     try:
-        marcar_evento(lead)
         respuesta = _enviar_al_sink(payload_del_lead(lead))
         if respuesta is not None:
             lead.despachado_en = timezone.now()

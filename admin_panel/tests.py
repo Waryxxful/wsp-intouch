@@ -53,7 +53,13 @@ class ChatEndpointsTest(TestCase):
         Conversation.objects.filter(pk=vieja.pk).update(
             updated_at=timezone.now() - timedelta(days=30)
         )
-        hoy = timezone.now().date().isoformat()
+        # localdate() y no now().date(): el segundo da la fecha en UTC y la
+        # vista filtra por `updated_at__date`, que Django evalua en el
+        # TIME_ZONE del proyecto (America/Santiago). Las tres horas del dia
+        # en que UTC y Santiago estan en fechas distintas, el test pedia un
+        # dia y la fila estaba en el otro -- fallaba por la hora del reloj,
+        # no por el codigo.
+        hoy = timezone.localdate().isoformat()
         resp = self.client.get(f"/demo/api/conversations?estado=todas&desde={hoy}&hasta={hoy}")
         data = resp.json()
         self.assertEqual(data["count"], 1)

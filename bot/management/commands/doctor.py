@@ -127,6 +127,27 @@ def chequear_variables_obligatorias(opciones):
         yield Hallazgo(FALLA, "WHATSAPP_VERIFY_TOKEN quedo en el default 'CHANGEME'")
 
 
+def chequear_token_interno(opciones):
+    """El token que separa /internal/webhook de cualquiera que alcance el
+    puerto. Sin el, la vista responde 503 y el bot deja de recibir del
+    dispatcher -- o sea que un olvido aca se ve como 'el bot no contesta'."""
+    token = getattr(settings, "WEBHOOK_INTERNAL_TOKEN", "")
+    if not token:
+        yield Hallazgo(
+            FALLA, "WEBHOOK_INTERNAL_TOKEN no esta configurado",
+            "/internal/webhook responde 503 y el dispatcher no puede entregar "
+            "mensajes. Generar uno con `openssl rand -hex 32` y ponerlo IGUAL "
+            "en el .env.docker de este bot y en el .env de wsp_webhook_intouch.",
+        )
+    elif len(token) < 32:
+        yield Hallazgo(
+            AVISO, f"WEBHOOK_INTERNAL_TOKEN es corto ({len(token)} chars)",
+            "conviene 64 hex de `openssl rand -hex 32`.",
+        )
+    else:
+        yield Hallazgo(OK, "WEBHOOK_INTERNAL_TOKEN configurado")
+
+
 def chequear_cliente_activo(opciones):
     from bot.models import CLIENTE_CHOICES
     validos = [c[0] for c in CLIENTE_CHOICES]
@@ -736,7 +757,8 @@ def chequear_whatsapp(opciones):
 
 SECCIONES = {
     "config": [chequear_variables_obligatorias, chequear_cliente_activo,
-               chequear_rag_schema, chequear_schema_efectivo, chequear_langfuse],
+               chequear_rag_schema, chequear_schema_efectivo, chequear_langfuse,
+               chequear_token_interno],
     "modelos": [chequear_modelos_declarados, chequear_orden_de_proveedores,
                 chequear_catalogo_openrouter],
     "rag": [chequear_dimension_embeddings, chequear_supabase],

@@ -1043,6 +1043,21 @@ class LeadInTouch(models.Model):
         help_text="Cuándo se despachó al destino externo. Nulo con LEAD_SINK=none, "
                   "y nulo tras un fallo: un lead sin despachar tiene que ser visible.")
 
+    # El receptor devuelve 409 cuando la identidad del contacto es ambigua
+    # (el mismo teléfono en dos contactos, o teléfono y correo que apuntan a
+    # personas distintas). Un conflicto NO se resuelve reintentando -- hace
+    # falta que una persona decida del lado del CRM -- así que se marca
+    # aparte de un fallo de red: un fallo se reintenta solo, un conflicto no.
+    conflicto_en = models.DateTimeField(
+        null=True, blank=True,
+        help_text="Cuándo el receptor marcó un conflicto de identidad (409). "
+                  "Nulo si nunca hubo uno, o si un evento nuevo lo limpió porque "
+                  "el contenido cambió y puede resolver la ambigüedad.")
+    conflicto_motivo = models.TextField(
+        blank=True, default="",
+        help_text="El motivo del conflicto que informó el receptor, o un texto "
+                  "genérico si el cuerpo del 409 no traía uno.")
+
     # Idempotencia del despacho (spec de la integración con el CRM §4). Son
     # TRES cosas distintas y por eso son tres campos:
     #

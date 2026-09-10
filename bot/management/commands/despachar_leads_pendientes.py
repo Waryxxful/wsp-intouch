@@ -14,6 +14,14 @@ nada pendiente" -- por eso se distingue con un mensaje propio y una
 `CommandError` (código de salida != 0), en vez de dejar que el bucle imprima
 "Leads despachados: 0" como si todo estuviera en orden.
 
+UN LEAD EN CONFLICTO (409) NO SE REINTENTA ACÁ: la ambigüedad de identidad que
+señaló el receptor no la resuelve un reintento, la resuelve una persona del
+lado del CRM. Este barrido lo excluye de "pendientes" -- si no, reintentaría
+el mismo 409 cada 15 minutos para siempre -- pero lo REPORTA en la salida:
+un conflicto silencioso es peor que uno ruidoso, porque el barrido diría
+"0 pendientes" mientras hay leads que nadie está trabajando. La única vía de
+vuelta al circuito es el reintento manual del panel.
+
 OJO CON EL IMPORT: se importa el MÓDULO `lead_intouch`, no sus nombres sueltos
 (`from bot.business.lead_intouch import _enviar_al_sink`). Un `import` directo
 del nombre se resuelve UNA vez, en el primer import de este archivo -- y en
@@ -56,11 +64,21 @@ class Command(BaseCommand):
             # `list(...)` fuerza la consulta ACÁ, adentro del try: si revienta
             # (BD caída, columna que no existe), la excepción se distingue de
             # un lote vacío en vez de perderse en la primera vuelta del `for`.
+            #
+            # `conflicto_en__isnull=True` saca del barrido los leads que ya
+            # tienen un conflicto marcado: reintentarlos sólo repite el mismo
+            # 409 cada vez, y lo que hace falta es que una persona los
+            # resuelva del lado del CRM.
             pendientes = list(
                 LeadInTouch.objects
                 .select_related("conversation")
-                .filter(despachado_en__isnull=True)
+                .filter(despachado_en__isnull=True, conflicto_en__isnull=True)
                 .order_by("actualizado")[:opciones["limite"]]
+            )
+            en_conflicto = (
+                LeadInTouch.objects
+                .filter(despachado_en__isnull=True, conflicto_en__isnull=False)
+                .count()
             )
         except Exception as error:
             logger.error("[lead] no pude consultar los leads pendientes de despacho",
@@ -69,11 +87,19 @@ class Command(BaseCommand):
                 f"No pude consultar los leads pendientes de despacho: {error}") from error
 
         if not pendientes:
-            self.stdout.write("No hay leads pendientes de despachar.")
+            mensaje = "No hay leads pendientes de despachar."
+            if en_conflicto:
+                # Un conflicto silencioso es peor que uno ruidoso: sin esto,
+                # el barrido diría "no hay nada pendiente" mientras hay leads
+                # que nadie está trabajando.
+                mensaje += (f" {en_conflicto} lead(s) con conflicto de identidad "
+                           "esperando resolución manual en el CRM.")
+            self.stdout.write(mensaje)
             return
 
         despachados = 0
         fallidos = 0
+        conflictos_nuevos = 0
         for lead in pendientes:
             if not self._vale_la_pena(lead):
                 continue
@@ -84,20 +110,29 @@ class Command(BaseCommand):
                 if not lead.evento_id:
                     lead_intouch.marcar_evento(lead)
 
-                respuesta = lead_intouch._enviar_al_sink(lead_intouch.payload_del_lead(lead))
-                if respuesta is None:
+                resultado = lead_intouch._enviar_al_sink(lead_intouch.payload_del_lead(lead))
+
+                if resultado["resultado"] == "ok":
+                    cuerpo = resultado["cuerpo"]
+                    lead.despachado_en = timezone.now()
+                    lead.crm_contact_id = cuerpo.get("contactId") or ""
+                    lead.crm_deal_id = cuerpo.get("dealId") or ""
+                    lead.save(update_fields=[
+                        "despachado_en", "crm_contact_id", "crm_deal_id"])
+                    despachados += 1
+                elif resultado["resultado"] == "conflicto":
+                    lead.conflicto_en = timezone.now()
+                    lead.conflicto_motivo = resultado["motivo"]
+                    lead.save(update_fields=["conflicto_en", "conflicto_motivo"])
+                    conflictos_nuevos += 1
+                    logger.warning(
+                        "[lead] conflicto de identidad despachando %s: %s",
+                        lead.conversation.wa_id, resultado["motivo"])
+                else:
                     fallidos += 1
                     logger.warning(
                         "[lead] el destino externo no aceptó el reintento de %s",
                         lead.conversation.wa_id)
-                    continue
-
-                lead.despachado_en = timezone.now()
-                lead.crm_contact_id = respuesta.get("contactId") or ""
-                lead.crm_deal_id = respuesta.get("dealId") or ""
-                lead.save(update_fields=[
-                    "despachado_en", "crm_contact_id", "crm_deal_id"])
-                despachados += 1
             except Exception:
                 # Un lead que revienta no puede detener a los demás -- pero
                 # queda su rastro en el log, con el número para poder ubicarlo.
@@ -106,7 +141,9 @@ class Command(BaseCommand):
                                lead.conversation.wa_id, exc_info=True)
 
         self.stdout.write(
-            f"Leads despachados: {despachados}. Con fallo: {fallidos}.")
+            f"Leads despachados: {despachados}. Con fallo: {fallidos}. "
+            f"Con conflicto de identidad (requieren intervención manual): "
+            f"{en_conflicto + conflictos_nuevos}.")
 
     def _vale_la_pena(self, lead) -> bool:
         """Una fila sin ningún antecedente no es un lead que mandar.

@@ -124,7 +124,9 @@ class EstadoDespachoTest(TestCase):
     def test_el_reintento_despacha_y_devuelve_el_estado_nuevo(self):
         lead = self._lead("56900000053")
         with patch("bot.business.lead_intouch._enviar_al_sink",
-                   return_value={"status": "created", "contactId": "c9", "dealId": None}):
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "created", "contactId": "c9",
+                                           "dealId": None}}):
             resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
         self.assertEqual(resp.status_code, 200)
         datos = json.loads(resp.content)
@@ -134,7 +136,8 @@ class EstadoDespachoTest(TestCase):
     @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
     def test_un_reintento_que_falla_lo_dice_sin_reventar(self):
         lead = self._lead("56900000054")
-        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=None):
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "fallo", "motivo": "el receptor respondió 500"}):
             resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
         self.assertEqual(resp.status_code, 200)
         self.assertEqual(json.loads(resp.content)["estado_despacho"], "pendiente")
@@ -147,3 +150,53 @@ class EstadoDespachoTest(TestCase):
     def test_un_lead_que_no_existe_da_404(self):
         self.assertEqual(
             self.client.post("/demo/api/leads/999999/reintentar").status_code, 404)
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_un_lead_en_conflicto_aparece_con_su_propio_estado(self):
+        # El cuarto estado del panel: distinto de "pendiente" porque un
+        # conflicto no se arregla solo, necesita una persona en el CRM.
+        from django.utils import timezone
+
+        self._lead("56900000056", conflicto_en=timezone.now(),
+                   conflicto_motivo="el teléfono ya está en otro contacto")
+        datos = json.loads(self.client.get("/demo/api/leads").content)
+        fila = datos["leads"][0]
+        self.assertEqual(fila["estado_despacho"], "conflicto")
+        self.assertEqual(fila["conflicto_motivo"], "el teléfono ya está en otro contacto")
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_el_reintento_manual_sigue_funcionando_sobre_un_conflicto(self):
+        # Es la ÚNICA vía por la que un conflicto vuelve al circuito: el bot
+        # no tiene forma de enterarse solo de que una persona lo resolvió del
+        # lado del CRM, así que el reintento manual no puede estar bloqueado
+        # por la marca de conflicto.
+        from django.utils import timezone
+
+        lead = self._lead("56900000057", conflicto_en=timezone.now(),
+                          conflicto_motivo="el teléfono ya está en otro contacto")
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "created", "contactId": "c10",
+                                           "dealId": None}}):
+            resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
+        self.assertEqual(resp.status_code, 200)
+        datos = json.loads(resp.content)
+        self.assertEqual(datos["estado_despacho"], "despachado")
+        lead.refresh_from_db()
+        self.assertIsNone(lead.conflicto_en)
+        self.assertEqual(lead.conflicto_motivo, "")
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_el_reintento_manual_puede_volver_a_marcar_conflicto(self):
+        # Si la persona todavía no arregló la identidad del lado del CRM, el
+        # reintento manual puede volver a chocar con el mismo 409 -- y eso es
+        # correcto, no un bug: se lo dice tal cual.
+        lead = self._lead("56900000058")
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "conflicto",
+                                 "motivo": "el correo ya está en otro contacto"}):
+            resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
+        self.assertEqual(resp.status_code, 200)
+        datos = json.loads(resp.content)
+        self.assertEqual(datos["estado_despacho"], "conflicto")
+        self.assertEqual(datos["conflicto_motivo"], "el correo ya está en otro contacto")

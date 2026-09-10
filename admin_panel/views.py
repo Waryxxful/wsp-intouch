@@ -1331,12 +1331,19 @@ def api_leads(request):
 def _estado_despacho(lead) -> str:
     """En qué estado está el envío de este lead al CRM.
 
-    Tres estados y no un booleano: con `LEAD_SINK=none` TODOS los leads
+    Cuatro estados y no un booleano: con `LEAD_SINK=none` TODOS los leads
     estarían "pendientes" y el rojo del panel dejaría de significar algo. Un
     estado propio para "no hay destino configurado" mantiene la señal.
+
+    "conflicto" es distinto de "pendiente" A PROPÓSITO: un pendiente se
+    arregla solo (el barrido lo reintenta), un conflicto no -- necesita que
+    una persona decida la identidad correcta del lado del CRM. Confundirlos
+    en el panel sería el mismo error que confundirlos en el código.
     """
     if settings.LEAD_SINK == "none":
         return "sin_destino"
+    if lead.conflicto_en:
+        return "conflicto"
     return "despachado" if lead.despachado_en else "pendiente"
 
 
@@ -1402,6 +1409,7 @@ def api_leads_intouch(request):
                 "actualizado": lead.actualizado.isoformat(),
                 "notificado": bool(lead.notificado_en),
                 "estado_despacho": _estado_despacho(lead),
+                "conflicto_motivo": lead.conflicto_motivo,
                 "crm_contact_id": lead.crm_contact_id,
                 "crm_deal_id": lead.crm_deal_id,
                 # Se conserva por compatibilidad con el frontend viejo.
@@ -1422,10 +1430,17 @@ def api_lead_reintentar(request, lead_id: int):
     había hecho commit y se perdió la respuesta, devuelve el mismo id en vez
     de crear otra oportunidad. Por eso NO se llama a `marcar_evento` acá.
 
+    SIGUE FUNCIONANDO SOBRE UN LEAD EN CONFLICTO, a propósito y sin ninguna
+    guarda que lo bloquee: es la ÚNICA vía por la que un conflicto vuelve al
+    circuito. El bot no tiene forma de enterarse solo de que una persona lo
+    resolvió del lado del CRM -- ni el barrido ni el despacho en el turno lo
+    reintentan (ver `_despachar_si_corresponde` y `despachar_leads_pendientes`)
+    -- así que este botón es deliberadamente el único camino de vuelta.
+
     No propaga el error: un reintento que falla informa el estado y deja el
     lead reintentable, que es exactamente lo que ya era.
     """
-    from bot.business.lead_intouch import _enviar_al_sink, payload_del_lead
+    from bot.business import lead_intouch
     from bot.models import LeadInTouch
 
     lead = get_object_or_404(
@@ -1437,28 +1452,39 @@ def api_lead_reintentar(request, lead_id: int):
             "detalle": "No hay destino configurado (LEAD_SINK=none).",
             "crm_contact_id": lead.crm_contact_id,
             "crm_deal_id": lead.crm_deal_id,
+            "conflicto_motivo": lead.conflicto_motivo,
         })
 
     if not lead.evento_id:
-        from bot.business.lead_intouch import marcar_evento
-        marcar_evento(lead)
+        lead_intouch.marcar_evento(lead)
 
     try:
-        respuesta = _enviar_al_sink(payload_del_lead(lead))
+        resultado = lead_intouch._enviar_al_sink(lead_intouch.payload_del_lead(lead))
     except Exception:
         logger.warning("[lead] falló el reintento manual de %s", lead_id, exc_info=True)
-        respuesta = None
+        resultado = {"resultado": "fallo", "motivo": "excepción durante el reintento manual"}
 
-    if respuesta is not None:
+    if resultado["resultado"] == "ok":
+        cuerpo = resultado["cuerpo"]
         lead.despachado_en = timezone.now()
-        lead.crm_contact_id = respuesta.get("contactId") or ""
-        lead.crm_deal_id = respuesta.get("dealId") or ""
-        lead.save(update_fields=["despachado_en", "crm_contact_id", "crm_deal_id"])
+        lead.crm_contact_id = cuerpo.get("contactId") or ""
+        lead.crm_deal_id = cuerpo.get("dealId") or ""
+        # La persona ya resolvió la ambigüedad del lado del CRM: se limpia el
+        # conflicto para que el estado no siga marcándolo.
+        lead.conflicto_en = None
+        lead.conflicto_motivo = ""
+        lead.save(update_fields=["despachado_en", "crm_contact_id", "crm_deal_id",
+                                  "conflicto_en", "conflicto_motivo"])
+    elif resultado["resultado"] == "conflicto":
+        lead.conflicto_en = timezone.now()
+        lead.conflicto_motivo = resultado["motivo"]
+        lead.save(update_fields=["conflicto_en", "conflicto_motivo"])
 
     return JsonResponse({
         "estado_despacho": _estado_despacho(lead),
         "crm_contact_id": lead.crm_contact_id,
         "crm_deal_id": lead.crm_deal_id,
+        "conflicto_motivo": lead.conflicto_motivo,
     })
 
 

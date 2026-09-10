@@ -332,7 +332,15 @@ def marcar_evento(lead) -> bool:
     # `despachado_en` se limpia: hay contenido nuevo que todavía no llegó al
     # destino, y dejarlo sellado escondería el lead de los pendientes.
     lead.despachado_en = None
-    lead.save(update_fields=["evento_id", "payload_hash", "revision", "despachado_en"])
+    # El conflicto se limpia por la misma razón: si el contenido cambió, el
+    # dato nuevo puede ser justo lo que resuelve la ambigüedad que el receptor
+    # señaló (un correo que faltaba, un teléfono corregido), así que el lead
+    # vuelve a ser despachable en el próximo intento.
+    lead.conflicto_en = None
+    lead.conflicto_motivo = ""
+    lead.save(update_fields=[
+        "evento_id", "payload_hash", "revision", "despachado_en",
+        "conflicto_en", "conflicto_motivo"])
     return True
 
 
@@ -369,13 +377,61 @@ def payload_del_lead(lead) -> dict:
 _ESTADOS_DE_EXITO = frozenset({"created", "replayed", "updated"})
 
 
-def _enviar_al_sink(payload: dict) -> dict | None:
-    """POST al receptor. Devuelve su cuerpo si aceptó el lead, None si no.
+# Los tres resultados posibles de `_enviar_al_sink`. Explícito y no un booleano
+# ni un `None`: la lección de `_tri_estado` más arriba en este mismo archivo
+# aplica también acá -- un valor de dos estados no puede representar tres sin
+# perder uno, y "fallo" y "conflicto" necesitan tratos opuestos (uno se
+# reintenta solo, el otro nunca sin que una persona intervenga).
+_RESULTADOS_ENVIO = frozenset({"ok", "conflicto", "fallo"})
 
-    ANTES DEVOLVÍA UN BOOLEANO MIRANDO SÓLO EL CÓDIGO HTTP, y eso convertía
-    tres fallas distintas en éxito: un 2xx con el cuerpo vacío, un redirect a
-    una página de login (que llega como 200 con HTML) y un JSON roto. Un
-    `raise_for_status` exitoso no prueba que el lead esté en el pipeline.
+
+def _motivo_del_conflicto(crudo: bytes, tipo: str) -> str:
+    """El motivo del 409 que informó el receptor, o uno genérico.
+
+    Best-effort a propósito: el 409 ya se clasificó por el código HTTP antes
+    de llegar acá, así que esto no puede reventar ni cambiar la clasificación
+    si el cuerpo no trae el detalle -- sólo enriquece el texto que ve la
+    persona que va a resolver el conflicto en el CRM.
+    """
+    import json
+
+    if "json" in tipo:
+        try:
+            cuerpo = json.loads(crudo)
+        except (ValueError, TypeError):
+            cuerpo = None
+        if isinstance(cuerpo, dict):
+            motivo = cuerpo.get("motivo") or cuerpo.get("message") or cuerpo.get("error")
+            if motivo:
+                return str(motivo)[:500]
+    return "el receptor respondió 409 sin detalle del motivo"
+
+
+def _enviar_al_sink(payload: dict) -> dict:
+    """POST al receptor. Clasifica la respuesta en tres resultados posibles.
+
+    ANTES DEVOLVÍA `dict | None`, y un `None` era indistinguible entre un
+    timeout, un 500, un cuerpo con HTML de login y un 409 de conflicto de
+    identidad. El 409 es distinto de todo lo demás: no se resuelve
+    reintentando -- el mismo teléfono en dos contactos, o teléfono y correo
+    que apuntan a personas distintas, necesita que una persona decida del
+    lado del CRM. Tratarlo como un fallo de red más lo dejaba reintentándose
+    cada 15 minutos para siempre, con el receptor respondiendo 409 cada vez.
+
+    Se clasifica por el CÓDIGO HTTP y no por el cuerpo de la respuesta: el
+    status es transporte. Si el receptor mañana renombra un valor de su JSON
+    editorial, la clasificación de transporte no se entera y no se rompe.
+
+    El resultado es un dict con clave `resultado` en _RESULTADOS_ENVIO --
+    ninguno de los tres es un sentinel fácil de confundir con otro:
+
+    - "ok": el receptor aceptó el lead (2xx, JSON parseable, `status` conocido,
+      `contactId` presente). Trae además `cuerpo`, el JSON completo.
+    - "conflicto": 409. Trae además `motivo`, el texto del receptor si vino en
+      el cuerpo, o uno genérico si no.
+    - "fallo": todo lo demás -- otros 4xx, 5xx, timeout, HTML de login,
+      redirect, JSON inválido, contrato incompleto. Se reintenta solo. Trae
+      además `motivo`, para el log y para quien depure.
 
     stdlib `urllib` y no `requests`, que no está en requirements -- mismo
     criterio que bot/notify.py y utils/dios_registration.py.
@@ -387,7 +443,7 @@ def _enviar_al_sink(payload: dict) -> dict | None:
     destino = getattr(settings, "LEAD_SINK_URL", "")
     if not destino:
         logger.warning("[lead] LEAD_SINK=http pero LEAD_SINK_URL está vacío")
-        return None
+        return {"resultado": "fallo", "motivo": "LEAD_SINK_URL está vacío"}
 
     cabeceras = {"Content-Type": "application/json"}
     token = getattr(settings, "LEAD_SINK_TOKEN", "")
@@ -410,41 +466,53 @@ def _enviar_al_sink(payload: dict) -> dict | None:
             status_http = resp.status
             tipo = (resp.headers.get("Content-Type") or "").lower()
     except urllib.error.HTTPError as error:
-        # 4xx y 5xx llegan acá. El motivo se loguea, el cuerpo del error no:
-        # puede traer detalle interno del receptor.
+        # 4xx y 5xx llegan acá. El 409 se separa del resto: es el único que no
+        # se reintenta solo.
+        if error.code == 409:
+            try:
+                crudo_error = error.read()
+            except Exception:
+                crudo_error = b""
+            tipo_error = (error.headers.get("Content-Type") or "").lower() if error.headers else ""
+            motivo = _motivo_del_conflicto(crudo_error, tipo_error)
+            logger.warning("[lead] el receptor marcó un conflicto de identidad: %s", motivo)
+            return {"resultado": "conflicto", "motivo": motivo}
+        # El motivo se loguea, el cuerpo del error no: puede traer detalle
+        # interno del receptor.
         logger.warning("[lead] el receptor respondió %s", error.code)
-        return None
+        return {"resultado": "fallo", "motivo": f"el receptor respondió {error.code}"}
 
     if not (200 <= status_http < 300):
         logger.warning("[lead] el receptor respondió %s", status_http)
-        return None
+        return {"resultado": "fallo", "motivo": f"el receptor respondió {status_http}"}
 
     if "json" not in tipo:
         # El síntoma de un redirect a login: 200 con HTML.
         logger.warning("[lead] el receptor respondió %s en vez de JSON", tipo or "sin tipo")
-        return None
+        return {"resultado": "fallo",
+                "motivo": f"el receptor respondió {tipo or 'sin tipo'} en vez de JSON"}
 
     try:
         cuerpo = json.loads(crudo)
     except (ValueError, TypeError):
         logger.warning("[lead] el receptor respondió un JSON que no se puede leer")
-        return None
+        return {"resultado": "fallo", "motivo": "el receptor respondió un JSON que no se puede leer"}
 
     if not isinstance(cuerpo, dict):
         logger.warning("[lead] el receptor respondió algo que no es un objeto")
-        return None
+        return {"resultado": "fallo", "motivo": "el receptor respondió algo que no es un objeto"}
 
     if cuerpo.get("status") not in _ESTADOS_DE_EXITO:
         logger.warning("[lead] el receptor respondió status=%r", cuerpo.get("status"))
-        return None
+        return {"resultado": "fallo", "motivo": f"el receptor respondió status={cuerpo.get('status')!r}"}
 
     if not cuerpo.get("contactId"):
         # `dealId` vacío SÍ es válido (un lead frío no abre oportunidad), pero
         # sin contacto no hay nada en el CRM que mirar.
         logger.warning("[lead] el receptor no devolvió contactId")
-        return None
+        return {"resultado": "fallo", "motivo": "el receptor no devolvió contactId"}
 
-    return cuerpo
+    return {"resultado": "ok", "cuerpo": cuerpo}
 
 
 def _despachar_si_corresponde(wa_id: str) -> None:
@@ -453,6 +521,11 @@ def _despachar_si_corresponde(wa_id: str) -> None:
     Un fallo NO sella `despachado_en`: un lead sin despachar tiene que quedar
     visible y reintentable. Y nunca propaga: la fuente de verdad ya está
     escrita, y el despacho es un espejo.
+
+    Un conflicto (409) tampoco se reintenta acá: necesita que una persona lo
+    resuelva del lado del CRM, y el bot no tiene forma de enterarse solo de
+    que eso pasó. La única vía deliberada de vuelta al circuito es el
+    reintento manual del panel (`admin_panel.views.api_lead_reintentar`).
     """
     sink = getattr(settings, "LEAD_SINK", "none")
     if sink == "none":
@@ -467,18 +540,27 @@ def _despachar_si_corresponde(wa_id: str) -> None:
         return
     try:
         hay_evento_nuevo = marcar_evento(lead)
-        # Sin contenido nuevo Y ya sellado, no hay nada que despachar: es un
-        # reintento del mismo hecho, no una actualización. Pero si el sello
-        # sigue vacío (el intento anterior falló, o nunca hubo uno) hay que
-        # reintentar aunque el contenido sea el mismo -- ver el docstring.
-        if not hay_evento_nuevo and lead.despachado_en is not None:
+        # Sin contenido nuevo Y (ya sellado O en conflicto), no hay nada que
+        # hacer automáticamente: sellado es un reintento del mismo hecho, y en
+        # conflicto es algo que sólo una persona destraba. Pero si ninguno de
+        # los dos sellos está puesto (el intento anterior falló de red, o
+        # nunca hubo uno) hay que reintentar aunque el contenido sea el mismo.
+        if not hay_evento_nuevo and (lead.despachado_en is not None
+                                     or lead.conflicto_en is not None):
             return
-        respuesta = _enviar_al_sink(payload_del_lead(lead))
-        if respuesta is not None:
+        resultado = _enviar_al_sink(payload_del_lead(lead))
+        if resultado["resultado"] == "ok":
+            cuerpo = resultado["cuerpo"]
             lead.despachado_en = timezone.now()
-            lead.crm_contact_id = respuesta.get("contactId") or ""
-            lead.crm_deal_id = respuesta.get("dealId") or ""
+            lead.crm_contact_id = cuerpo.get("contactId") or ""
+            lead.crm_deal_id = cuerpo.get("dealId") or ""
             lead.save(update_fields=["despachado_en", "crm_contact_id", "crm_deal_id"])
+        elif resultado["resultado"] == "conflicto":
+            lead.conflicto_en = timezone.now()
+            lead.conflicto_motivo = resultado["motivo"]
+            lead.save(update_fields=["conflicto_en", "conflicto_motivo"])
+            logger.warning("[lead] conflicto de identidad despachando %s: %s",
+                           wa_id, resultado["motivo"])
         else:
             logger.warning("[lead] el destino externo no aceptó el lead de %s", wa_id)
     except Exception:

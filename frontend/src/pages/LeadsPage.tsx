@@ -32,7 +32,8 @@ interface Lead {
   creado: string;
   actualizado: string;
   notificado: boolean;
-  estado_despacho: 'despachado' | 'pendiente' | 'sin_destino';
+  estado_despacho: 'despachado' | 'pendiente' | 'conflicto' | 'sin_destino';
+  conflicto_motivo: string;
   crm_contact_id: string;
   crm_deal_id: string;
 }
@@ -122,7 +123,7 @@ export function LeadsPage() {
     setReintentando(row.id);
     setError('');
     try {
-      const resp = await apiFetch<Pick<Lead, 'estado_despacho' | 'crm_contact_id' | 'crm_deal_id'>>(
+      const resp = await apiFetch<Pick<Lead, 'estado_despacho' | 'crm_contact_id' | 'crm_deal_id' | 'conflicto_motivo'>>(
         `/intouch/api/leads/${row.id}/reintentar`,
         { method: 'POST' },
       );
@@ -223,17 +224,33 @@ export function LeadsPage() {
               <Icon name="alert-triangle" size="sm" />
             </span>
           )}
+          {row.estado_despacho === 'conflicto' && (
+            // Distinto del "pendiente" de arriba a propósito: un pendiente se
+            // arregla solo con el barrido, un conflicto no -- necesita que
+            // una persona decida la identidad correcta en el CRM.
+            <span
+              title={`Conflicto de identidad, requiere resolución manual en el CRM: ${row.conflicto_motivo || 'sin detalle'}`}
+              className="text-warning"
+            >
+              <Icon name="alert-octagon" size="sm" />
+            </span>
+          )}
           {row.estado_despacho === 'despachado' && row.crm_contact_id && (
             <span title={`En el CRM: contacto ${row.crm_contact_id}`} className="text-success">
               <Icon name="check-circle" size="sm" />
             </span>
           )}
-          {row.estado_despacho === 'pendiente' && (
+          {(row.estado_despacho === 'pendiente' || row.estado_despacho === 'conflicto') && (
             // El DataTable real (ver DataTable.jsx en duralux-ui) rinde
             // `actions` como un array fijo de botones por fila, sin soporte
             // para ocultar una acción según el dato de esa fila -- por eso
             // el reintento va acá, condicionado por columna, y no en
             // `acciones` más abajo (que sí es igual para todas las filas).
+            //
+            // Sigue habilitado sobre un conflicto A PROPÓSITO: es la única
+            // vía por la que un conflicto vuelve al circuito, para cuando una
+            // persona ya lo resolvió del lado del CRM (ver
+            // admin_panel/views.py::api_lead_reintentar).
             <button
               type="button"
               className="btn btn-link btn-sm p-0 border-0"
@@ -308,10 +325,21 @@ export function LeadsPage() {
               {seleccionado.estado_despacho === 'pendiente' && (
                 <Badge variant="danger" soft pill>Sin despachar</Badge>
               )}
+              {seleccionado.estado_despacho === 'conflicto' && (
+                <Badge variant="warning" soft pill>Conflicto de identidad</Badge>
+              )}
               {seleccionado.estado_despacho === 'despachado' && seleccionado.crm_contact_id && (
                 <Badge variant="success" soft pill>En el CRM ({seleccionado.crm_contact_id})</Badge>
               )}
             </div>
+            {seleccionado.estado_despacho === 'conflicto' && (
+              <div className="col-12">
+                <Alert variant="warning" icon="feather-alert-octagon" title="Conflicto de identidad en el CRM">
+                  {guion(seleccionado.conflicto_motivo)} — requiere que una persona decida la
+                  identidad correcta en el CRM antes de reintentar.
+                </Alert>
+              </div>
+            )}
             {seleccionado.necesidad_principal && (
               <div className="col-12">
                 <Card title="Necesidad principal">

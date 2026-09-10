@@ -33,16 +33,31 @@ class EncendidoTest(TestCase):
 
     def test_despacha_y_sella(self):
         with patch("bot.business.lead_intouch._enviar_al_sink",
-                   return_value={"status": "created", "contactId": "c1", "dealId": None}):
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "created", "contactId": "c1", "dealId": None}}):
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertIsNotNone(LeadInTouch.objects.get().despachado_en)
 
     def test_un_fallo_deja_el_lead_sin_sellar_para_reintentarlo(self):
         # Un lead sin despachar tiene que ser VISIBLE: el sello es la única
         # forma de saber cuáles quedaron afuera.
-        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=None):
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "fallo", "motivo": "el receptor respondió 500"}):
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertIsNone(LeadInTouch.objects.get().despachado_en)
+
+    def test_un_conflicto_deja_el_lead_sin_sellar_y_marcado(self):
+        # Un conflicto tampoco sella `despachado_en` -- pero a diferencia de
+        # un fallo, queda marcado con `conflicto_en` para que el barrido deje
+        # de reintentarlo y el panel lo muestre distinto.
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "conflicto",
+                                 "motivo": "el teléfono ya está en otro contacto"}):
+            _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
+        lead = LeadInTouch.objects.get()
+        self.assertIsNone(lead.despachado_en)
+        self.assertIsNotNone(lead.conflicto_en)
+        self.assertEqual(lead.conflicto_motivo, "el teléfono ya está en otro contacto")
 
     def test_un_fallo_no_tumba_la_escritura(self):
         with patch("bot.business.lead_intouch._enviar_al_sink",
@@ -58,16 +73,18 @@ class EncendidoTest(TestCase):
         # real si tiene que despacharse -- es una actualizacion comercial, no
         # un reintento.
         with patch("bot.business.lead_intouch._enviar_al_sink",
-                   return_value={"status": "created", "contactId": "c1",
-                                 "dealId": None}) as enviar:
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "created", "contactId": "c1",
+                                           "dealId": None}}) as enviar:
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
         self.assertEqual(enviar.call_count, 1)
 
     def test_un_cambio_real_si_se_despacha_otra_vez(self):
         with patch("bot.business.lead_intouch._enviar_al_sink",
-                   return_value={"status": "updated", "contactId": "c1",
-                                 "dealId": None}) as enviar:
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "updated", "contactId": "c1",
+                                           "dealId": None}}) as enviar:
             _registrar_lead_impl("56900000011", {"empresa": "Acme SpA"})
             _registrar_lead_impl("56900000011", {"cargo": "Gerenta"})
         self.assertEqual(enviar.call_count, 2)
@@ -167,6 +184,41 @@ class EventoTest(TestCase):
         self.lead.refresh_from_db()
         self.assertNotEqual(self.lead.evento_id, primero)
         self.assertEqual(self.lead.revision, 2)
+
+    def test_un_cambio_de_contenido_limpia_el_conflicto(self):
+        # Simetrico con como se limpia despachado_en: si el contenido cambio,
+        # el dato nuevo puede resolver la ambiguedad que senalo el receptor,
+        # asi que el lead vuelve a ser despachable.
+        from bot.business.lead_intouch import marcar_evento
+        from django.utils import timezone
+
+        marcar_evento(self.lead)
+        self.lead.conflicto_en = timezone.now()
+        self.lead.conflicto_motivo = "el correo ya está en otro contacto"
+        self.lead.save(update_fields=["conflicto_en", "conflicto_motivo"])
+
+        self.lead.cargo = "Gerenta de Operaciones"
+        self.lead.save()
+        self.assertTrue(marcar_evento(self.lead))
+        self.lead.refresh_from_db()
+        self.assertIsNone(self.lead.conflicto_en)
+        self.assertEqual(self.lead.conflicto_motivo, "")
+
+    def test_sin_cambio_de_contenido_no_limpia_el_conflicto(self):
+        # El contraste del test anterior: sin evento nuevo (mismo contenido),
+        # no hay motivo para asumir que la ambiguedad se resolvio.
+        from bot.business.lead_intouch import marcar_evento
+        from django.utils import timezone
+
+        marcar_evento(self.lead)
+        self.lead.conflicto_en = timezone.now()
+        self.lead.conflicto_motivo = "el correo ya está en otro contacto"
+        self.lead.save(update_fields=["conflicto_en", "conflicto_motivo"])
+
+        self.assertFalse(marcar_evento(self.lead))
+        self.lead.refresh_from_db()
+        self.assertIsNotNone(self.lead.conflicto_en)
+        self.assertEqual(self.lead.conflicto_motivo, "el correo ya está en otro contacto")
 
     def test_la_revision_solo_avanza(self):
         from bot.business.lead_intouch import marcar_evento

@@ -88,6 +88,35 @@ services:
       --log-level info --capture-output"
     restart: unless-stopped
 
+  # Sidecar cron: barrido de leads pendientes de despacho al CRM.
+  # Cada 15 minutos, porque un lead que pidio contacto humano y espera una
+  # hora ya perdio su ventana. El comando es barato: sale limpio si no hay
+  # nada pendiente o si LEAD_SINK=none.
+  #
+  # NO SE LEVANTA SOLO CON EDITAR ESTE ARCHIVO: agregar un servicio nuevo al
+  # compose exige un `docker compose up -d --force-recreate` real (o
+  # `up -d cron` para traer solo este), no alcanza con un `kill -HUP 1` al
+  # contenedor de `web` -- ese recarga workers de gunicorn, no crea
+  # contenedores nuevos. Levantar este sidecar es parte del despliegue, no
+  # de este cambio.
+  cron:
+    build: .
+    env_file:
+      - .env.docker
+    environment:
+      DJANGO_SETTINGS_MODULE: config.settings_docker
+    volumes:
+      - .:/app
+      - ./dios.json:/app/dios.json:ro
+    command: >
+      sh -c "while true; do
+               python manage.py despachar_leads_pendientes || true;
+               sleep 900;
+             done"
+    restart: unless-stopped
+    depends_on:
+      - web
+
 volumes:
   media_data:
   whatsapp_media_data:

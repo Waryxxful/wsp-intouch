@@ -9,9 +9,10 @@
 | Emisor | `wsp_intouch` rama `master`, commit `c8c1356` |
 | Runtime CRM | bun 1.3.12, Node ≥22, Prisma 7.9.1, PostgreSQL 17 |
 
-**Estado: IMPLEMENTADO EN LOS DOS EXTREMOS, E2E PENDIENTE.** El receptor está
-completo y probado; el emisor también, por la sesión `admincrm-3a`; falta
-correr el circuito conectado, bloqueado por un dato de negocio.
+**Estado: VALIDADO EN PRUEBAS, PENDIENTE DE DESPLIEGUE.** Los dos extremos
+completos y **el circuito probado conectado** el 2026-09-10 (grupo D). Lo que
+falta para producción es el traspaso del número de WhatsApp, que es un
+despliegue con el usuario presente, y el acceso del comercial (grupo E).
 
 ---
 
@@ -110,16 +111,41 @@ respuesta a alguien **sin credencial**.
 | C08 | Telemetría de terceros | Apagada | `Anonymous usage telemetry is off for this install` | **PASS** |
 | C09 | Agente de research | No desplegado | `No agent bridge secret` | **PASS** |
 
-## Grupo D — E2E conectado: **NO EJECUTADO**
+## Grupo D — E2E conectado: **EJECUTADO 2026-09-10**
 
-| ID | Prueba | Bloqueo exacto |
-|---|---|---|
-| D01 | Lead sintético del emisor real → pipeline | **`INTOUCH_LEAD_OWNER_EMAIL` sin definir.** Decisión de negocio del usuario: a qué usuario del CRM se le asignan las oportunidades. `Deal.ownerId` es obligatorio y no se inventa |
-| D02 | Los 22 campos visibles en el detalle del contacto | Igual que D01, más abrir el CRM en el navegador (plan de acceso) |
-| D03 | Respuesta perdida después del commit | Igual que D01. El proxy está escrito en el plan (Task 14) |
-| D04 | El barrido recupera un pendiente tras reiniciar | Igual que D01 |
-| D05 | Escritura sintética en `QAIntouch` | **Autorización del usuario** para escribir en producción. Son dos filas en tablas con cero filas, limpiables por `wa_id` exacto |
-| D06 | Conversación real de WhatsApp | Credenciales de Meta |
+Corrido en coordinación entre las dos sesiones, con autorización explícita del
+usuario en **cada** sesión por separado. El emisor llamó a
+`_despachar_si_corresponde(wa_id)` — el camino real de producción — no a
+`_enviar_al_sink` a mano.
+
+Fixture, elegido para que no pueda confundirse con nada real: teléfono
+`56900000E2E` (con letras, inválido como número de WhatsApp), correo
+`e2e@prueba-intouch.invalid` (dominio reservado por RFC 2606), empresa
+`Prueba E2E InTouch`.
+
+| ID | Prueba | Esperado | Observado | Estado |
+|---|---|---|---|---|
+| D01 | Lead del emisor real → pipeline | 201 con los tres ids | `201` en 197,5 ms. `status: created`, `contactId=cmtvie2h5…`, `dealId=cmtvie2hg…`. **El emisor selló esos mismos ids** en `crm_contact_id` y `crm_deal_id` | **PASS** |
+| D02 | Los 22 campos preservados | Todos presentes | **14/14** campos dinámicos + los 8 nativos. `usa_ia_actualmente = true` (booleano real). `solicita_*` como dos `TASK` con vencimiento, resumen y siguiente acción en la `NOTE` | **PASS** |
+| D03 | Etapa y dueño | `QUALIFIED_TO_BUY`, dueño configurado | `QUALIFIED_TO_BUY`, `tomasvalenzuela@in-touchcrm.cl` | **PASS** |
+| D04 | **Replay con el emisor real** | 200, sin efectos | Llegaron **dos** peticiones: `201` en 197,5 ms y `200` en **15,3 ms**. 13× más rápido porque no hace trabajo. 1 contacto, 1 oportunidad | **PASS** |
+| D05 | Array estructurado | Reconstruible | `["whatsapp","voz","email"]` íntegro en `payload` | **PASS** |
+| D06 | El emisor usa `urllib`, no `requests` | stdlib | `userAgent: Python-urllib/3.11` | **PASS** |
+| D07 | Dominio reservado no crea empresa por dominio | `domain: null` | `null` — `domainFromEmail` de upstream rechaza `.invalid` por su lista de sufijos de máquina | **PASS** |
+| D08 | Limpieza de los datos de prueba | Cero en las dos bases | `QAIntouch`: 0 conversaciones, 0 leads (limpiado por `wa_id` exacto). CRM: 0 contactos, 0 empresas, 0 oportunidades | **PASS** |
+| D09 | Conversación real de WhatsApp | — | **NO EJECUTADO** — credenciales de Meta, y el traspaso del número es un despliegue con el usuario |
+
+**D04 no estaba en el plan de la prueba.** El emisor mandó dos veces y eso
+ejercitó el camino de replay con el código real: la segunda tardó 13 veces
+menos, que es la evidencia de que no vuelve a resolver identidad ni a escribir.
+
+**D07 es un reuso que se pagó solo**: `domainFromEmail` de upstream ya descarta
+los dominios de máquina, y `.invalid` está en su lista de sufijos. Sin eso, el
+fixture habría creado una empresa con dominio `prueba-intouch.invalid`.
+
+**Cuentas del payload**: viajaron **26** claves — los 22 campos de negocio del
+contrato más los 4 de transporte (`origen`, `clave_contacto`, `evento_id`,
+`revision`). Las dos sesiones llegaron al mismo número por caminos distintos.
 
 ## Grupo E — acceso del comercial: **NO EJECUTADO**
 

@@ -2,6 +2,7 @@
 oportunidades mientras el endpoint del orquestador no exista (spec §7.4).
 """
 import json
+from unittest.mock import patch
 
 from django.contrib.auth.models import User
 from django.test import TestCase, override_settings
@@ -65,3 +66,84 @@ class ApiLeadsTest(TestCase):
         resp = self.client.get("/demo/api/leads")
         datos = json.loads(resp.content)
         self.assertTrue(datos["sink_activo"])
+
+
+@override_settings(DEBUG=True)
+class EstadoDespachoTest(TestCase):
+    """Que el panel muestre si el lead llego al CRM, y deje reintentarlo.
+
+    Es lo que vuelve accionable un fallo de despacho: sin esto, un lead que no
+    llego solo se puede ver por SQL.
+
+    DEBUG=True a proposito, mismo motivo que ApiLeadsTest arriba: el comando
+    `manage.py test` fuerza DEBUG=False salvo `--debug-mode`, y sin DEBUG=True
+    `grancrm_login_required` no acepta la sesion de Django de estos tests (no
+    hay JWT del Orquestador aca), y las vistas redirigen (302) a login.
+    """
+
+    def setUp(self):
+        from django.contrib.auth.models import User
+
+        User.objects.create_user("panel", password="x")
+        self.client.login(username="panel", password="x")
+
+    def _lead(self, wa_id, **kwargs):
+        from bot.models import Conversation, LeadInTouch
+
+        conv = Conversation.objects.create(wa_id=wa_id)
+        return LeadInTouch.objects.create(
+            conversation=conv, empresa="Acme SpA", **kwargs)
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_un_lead_despachado_trae_los_ids_del_crm(self):
+        from django.utils import timezone
+
+        self._lead("56900000050", despachado_en=timezone.now(),
+                   crm_contact_id="c1", crm_deal_id="d1")
+        datos = json.loads(self.client.get("/demo/api/leads").content)
+        fila = datos["leads"][0]
+        self.assertEqual(fila["estado_despacho"], "despachado")
+        self.assertEqual(fila["crm_contact_id"], "c1")
+        self.assertEqual(fila["crm_deal_id"], "d1")
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_un_lead_sin_sellar_queda_pendiente(self):
+        self._lead("56900000051")
+        datos = json.loads(self.client.get("/demo/api/leads").content)
+        self.assertEqual(datos["leads"][0]["estado_despacho"], "pendiente")
+
+    @override_settings(LEAD_SINK="none")
+    def test_con_el_sink_apagado_no_dice_pendiente(self):
+        # Con el destino apagado TODOS los leads estarian "pendientes" y la
+        # señal se pierde: un estado propio evita el falso rojo.
+        self._lead("56900000052")
+        datos = json.loads(self.client.get("/demo/api/leads").content)
+        self.assertEqual(datos["leads"][0]["estado_despacho"], "sin_destino")
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_el_reintento_despacha_y_devuelve_el_estado_nuevo(self):
+        lead = self._lead("56900000053")
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"status": "created", "contactId": "c9", "dealId": None}):
+            resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
+        self.assertEqual(resp.status_code, 200)
+        datos = json.loads(resp.content)
+        self.assertEqual(datos["estado_despacho"], "despachado")
+        self.assertEqual(datos["crm_contact_id"], "c9")
+
+    @override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x")
+    def test_un_reintento_que_falla_lo_dice_sin_reventar(self):
+        lead = self._lead("56900000054")
+        with patch("bot.business.lead_intouch._enviar_al_sink", return_value=None):
+            resp = self.client.post(f"/demo/api/leads/{lead.id}/reintentar")
+        self.assertEqual(resp.status_code, 200)
+        self.assertEqual(json.loads(resp.content)["estado_despacho"], "pendiente")
+
+    def test_el_reintento_exige_POST(self):
+        lead = self._lead("56900000055")
+        self.assertEqual(
+            self.client.get(f"/demo/api/leads/{lead.id}/reintentar").status_code, 405)
+
+    def test_un_lead_que_no_existe_da_404(self):
+        self.assertEqual(
+            self.client.post("/demo/api/leads/999999/reintentar").status_code, 404)

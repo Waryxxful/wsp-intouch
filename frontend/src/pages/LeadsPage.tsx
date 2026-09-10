@@ -32,7 +32,9 @@ interface Lead {
   creado: string;
   actualizado: string;
   notificado: boolean;
-  despachado: boolean;
+  estado_despacho: 'despachado' | 'pendiente' | 'sin_destino';
+  crm_contact_id: string;
+  crm_deal_id: string;
 }
 
 interface RespuestaLeads {
@@ -88,11 +90,11 @@ function relativo(iso: string): string {
 export function LeadsPage() {
   const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
-  const [sinkActivo, setSinkActivo] = useState(false);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
   const [leadScore, setLeadScore] = useState('');
   const [seleccionado, setSeleccionado] = useState<Lead | null>(null);
+  const [reintentando, setReintentando] = useState<number | null>(null);
 
   useEffect(() => {
     // Descarte de respuestas viejas: si el filtro cambia rapido, las
@@ -106,12 +108,31 @@ export function LeadsPage() {
       .then(datos => {
         if (!vigente) return;
         setLeads(datos.leads);
-        setSinkActivo(datos.sink_activo);
       })
       .catch(err => { if (vigente) setError(err.message || 'No se pudieron cargar los leads.'); })
       .finally(() => { if (vigente) setLoading(false); });
     return () => { vigente = false; };
   }, [leadScore]);
+
+  // Reintento manual de despacho al CRM: patchea el lead en memoria con la
+  // respuesta del endpoint en vez de recargar la lista entera -- es lo mismo
+  // que devuelve GET /api/leads para ese lead, y evita una carrera con el
+  // filtro de lead_score si cambió mientras la petición estaba en vuelo.
+  const reintentar = async (row: Lead) => {
+    setReintentando(row.id);
+    setError('');
+    try {
+      const resp = await apiFetch<Pick<Lead, 'estado_despacho' | 'crm_contact_id' | 'crm_deal_id'>>(
+        `/intouch/api/leads/${row.id}/reintentar`,
+        { method: 'POST' },
+      );
+      setLeads(actuales => actuales.map(l => (l.id === row.id ? { ...l, ...resp } : l)));
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'No se pudo reintentar el despacho.');
+    } finally {
+      setReintentando(null);
+    }
+  };
 
   const columnas: DataTableColumn<Lead>[] = [
     {
@@ -193,13 +214,35 @@ export function LeadsPage() {
           <span>{relativo(row.actualizado)}</span>
           {row.notificado && (
             <span title="Ya se notificó como HOT">
-              <Icon name="feather-bell" size="sm" />
+              {/* Icon arma la clase como feather-${name}: va el nombre pelado. */}
+              <Icon name="bell" size="sm" />
             </span>
           )}
-          {sinkActivo && !row.despachado && (
-            <span title="Sin despachar al destino externo" className="text-danger">
-              <Icon name="feather-alert-triangle" size="sm" />
+          {row.estado_despacho === 'pendiente' && (
+            <span title="Sin despachar al CRM — se reintenta cada 15 minutos" className="text-danger">
+              <Icon name="alert-triangle" size="sm" />
             </span>
+          )}
+          {row.estado_despacho === 'despachado' && row.crm_contact_id && (
+            <span title={`En el CRM: contacto ${row.crm_contact_id}`} className="text-success">
+              <Icon name="check-circle" size="sm" />
+            </span>
+          )}
+          {row.estado_despacho === 'pendiente' && (
+            // El DataTable real (ver DataTable.jsx en duralux-ui) rinde
+            // `actions` como un array fijo de botones por fila, sin soporte
+            // para ocultar una acción según el dato de esa fila -- por eso
+            // el reintento va acá, condicionado por columna, y no en
+            // `acciones` más abajo (que sí es igual para todas las filas).
+            <button
+              type="button"
+              className="btn btn-link btn-sm p-0 border-0"
+              title="Reintentar despacho al CRM"
+              disabled={reintentando === row.id}
+              onClick={() => reintentar(row)}
+            >
+              <Icon name={reintentando === row.id ? 'loader' : 'refresh-cw'} size="sm" />
+            </button>
           )}
         </div>
       ),
@@ -262,8 +305,11 @@ export function LeadsPage() {
                 {LABEL_SCORE[seleccionado.lead_score] || 'Sin calificar'}
               </Badge>
               {seleccionado.notificado && <Badge variant="info" soft pill>Notificado</Badge>}
-              {sinkActivo && !seleccionado.despachado && (
+              {seleccionado.estado_despacho === 'pendiente' && (
                 <Badge variant="danger" soft pill>Sin despachar</Badge>
+              )}
+              {seleccionado.estado_despacho === 'despachado' && seleccionado.crm_contact_id && (
+                <Badge variant="success" soft pill>En el CRM ({seleccionado.crm_contact_id})</Badge>
               )}
             </div>
             {seleccionado.necesidad_principal && (

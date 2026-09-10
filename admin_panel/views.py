@@ -1,6 +1,7 @@
 import csv
 import importlib
 import json
+import logging
 import statistics
 import threading
 from datetime import date as _date
@@ -31,6 +32,8 @@ from bot.scraping import runner
 from bot.simulator.models import CorridaDePrueba, EscenarioDePrueba, marcar_corridas_stale_como_interrumpidas
 from bot.simulator.runner import ejecutar_corrida, iniciar_corrida
 from utils.tenant_middleware import get_current_db, set_current_db
+
+logger = logging.getLogger(__name__)
 
 
 def get_setting(key: str, default: str = "") -> str:
@@ -1325,6 +1328,18 @@ def api_leads(request):
     } for l in query[:500]], safe=False)
 
 
+def _estado_despacho(lead) -> str:
+    """En qué estado está el envío de este lead al CRM.
+
+    Tres estados y no un booleano: con `LEAD_SINK=none` TODOS los leads
+    estarían "pendientes" y el rojo del panel dejaría de significar algo. Un
+    estado propio para "no hay destino configurado" mantiene la señal.
+    """
+    if settings.LEAD_SINK == "none":
+        return "sin_destino"
+    return "despachado" if lead.despachado_en else "pendiente"
+
+
 @login_required
 def api_leads_intouch(request):
     """Los leads comerciales B2B de InTouch, para el panel (Task 18 del spec).
@@ -1386,10 +1401,64 @@ def api_leads_intouch(request):
                 "creado": lead.creado.isoformat(),
                 "actualizado": lead.actualizado.isoformat(),
                 "notificado": bool(lead.notificado_en),
+                "estado_despacho": _estado_despacho(lead),
+                "crm_contact_id": lead.crm_contact_id,
+                "crm_deal_id": lead.crm_deal_id,
+                # Se conserva por compatibilidad con el frontend viejo.
                 "despachado": bool(lead.despachado_en),
             }
             for lead in filas
         ],
+    })
+
+
+@login_required
+@csrf_exempt
+@require_http_methods(["POST"])
+def api_lead_reintentar(request, lead_id: int):
+    """Reintenta el despacho de un lead al CRM, a pedido de una persona.
+
+    Va con el MISMO `evento_id` que el intento anterior: si el receptor ya
+    había hecho commit y se perdió la respuesta, devuelve el mismo id en vez
+    de crear otra oportunidad. Por eso NO se llama a `marcar_evento` acá.
+
+    No propaga el error: un reintento que falla informa el estado y deja el
+    lead reintentable, que es exactamente lo que ya era.
+    """
+    from bot.business.lead_intouch import _enviar_al_sink, payload_del_lead
+    from bot.models import LeadInTouch
+
+    lead = get_object_or_404(
+        LeadInTouch.objects.select_related("conversation"), pk=lead_id)
+
+    if settings.LEAD_SINK == "none":
+        return JsonResponse({
+            "estado_despacho": "sin_destino",
+            "detalle": "No hay destino configurado (LEAD_SINK=none).",
+            "crm_contact_id": lead.crm_contact_id,
+            "crm_deal_id": lead.crm_deal_id,
+        })
+
+    if not lead.evento_id:
+        from bot.business.lead_intouch import marcar_evento
+        marcar_evento(lead)
+
+    try:
+        respuesta = _enviar_al_sink(payload_del_lead(lead))
+    except Exception:
+        logger.warning("[lead] falló el reintento manual de %s", lead_id, exc_info=True)
+        respuesta = None
+
+    if respuesta is not None:
+        lead.despachado_en = timezone.now()
+        lead.crm_contact_id = respuesta.get("contactId") or ""
+        lead.crm_deal_id = respuesta.get("dealId") or ""
+        lead.save(update_fields=["despachado_en", "crm_contact_id", "crm_deal_id"])
+
+    return JsonResponse({
+        "estado_despacho": _estado_despacho(lead),
+        "crm_contact_id": lead.crm_contact_id,
+        "crm_deal_id": lead.crm_deal_id,
     })
 
 

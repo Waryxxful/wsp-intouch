@@ -50,6 +50,8 @@ urlpatterns = [
     # arriba (LeadComercial). Ruta y vista distintas a proposito -- ver el
     # docstring de api_leads_intouch.
     path("api/leads", views.api_leads_intouch, name="api_leads_intouch"),
+    path("api/leads/<int:lead_id>/reintentar", views.api_lead_reintentar,
+         name="api_lead_reintentar"),
     path("api/admin/campanas", views.api_campanas, name="api_campanas"),
     path("api/admin/campanas/enviar", views.api_campana_enviar, name="api_campana_enviar"),
     path("api/admin/welcome", views.api_welcome, name="api_welcome"),

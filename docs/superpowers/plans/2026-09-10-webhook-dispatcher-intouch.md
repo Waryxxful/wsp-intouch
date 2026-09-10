@@ -686,7 +686,7 @@ nuevo = """    location = /intouch/webhook {
       # Al dispatcher de la App de Meta de InTouch (wsp_webhook_intouch), no
       # directo al bot: un webhook por App, y el BOT_MAP decide que numero
       # atiende cual bot. Cambiar ese JSON es como se traspasa un numero.
-      proxy_pass http://127.0.0.1:6030;"""
+      proxy_pass http://127.0.0.1:6030/webhook;"""
 assert s.count(viejo) == 1, f"esperaba 1 coincidencia, hay {s.count(viejo)}"
 p.write_text(s.replace(viejo, nuevo), encoding="utf-8")
 print("ok")
@@ -694,7 +694,13 @@ PY
 cat /tmp/nginx.conf.nuevo > nginx.conf     # preserva el inodo
 ```
 
-Notar que el `proxy_pass` va **sin path**: el dispatcher sirve en `/webhook` y nginx conserva el URI original.
+**Corregido tras medir: el `proxy_pass` va CON el path `/webhook`, no sin
+él.** La primera versión de este plan decía lo contrario ("sin path,
+nginx conserva el URI original"), pero medido en producción eso da 404: sin
+el path, nginx reenvía la URI original completa (`/intouch/webhook`) al
+dispatcher, que sólo sirve `/webhook` y no reconoce esa ruta. Con el path,
+nginx reemplaza el URI matcheado por `/webhook` y el dispatcher responde
+(403 sin firma válida, 200 con ella).
 
 - [ ] **Step 3: Validar de verdad, no contra el archivo viejo**
 

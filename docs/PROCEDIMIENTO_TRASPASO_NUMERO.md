@@ -136,11 +136,17 @@ y agregar el de InTouch, que ya está escrito en `DEPLOY_INTOUCH.md:246-248`:
 
 ```nginx
 location = /intouch/webhook {
-  proxy_pass http://127.0.0.1:8040/webhook;
+  proxy_pass http://127.0.0.1:6030/webhook;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
 }
 ```
+
+`6030` y no `8040`: ya no se apunta al bot directo, se apunta al dispatcher
+`wsp_webhook_intouch`, que valida la firma HMAC y reenvía según
+`phone_number_id`. Y el `proxy_pass` va **con** el path `/webhook` al final
+— sin él, nginx reenvía la URI original completa y el dispatcher, que sólo
+sirve `/webhook`, devuelve 404 en vez de 403 (medido).
 
 Va **antes** de los catch-all, y el `= ` (match exacto) no es opcional: sin él
 lo captura la SPA.
@@ -222,8 +228,30 @@ no se saltea.
 | 4.3 `activo=False` | el mismo checkbox en el admin |
 | 4.2 nginx | descomentar y `--force-recreate nginx` |
 | 4.1 contenedor | `docker compose start` |
-| 5 webhook en Meta | volver a apuntarlo a `/cavem/webhook` |
+| 5 webhook | ver "Rollback del webhook" abajo — dos caminos, uno barato y uno caro |
 | 1 login | `DROP USER` en QAIntouch + `DROP LOGIN` en master |
+
+### Rollback del webhook: barato primero, Meta como último recurso
+
+Desde que el número pasa por el dispatcher `wsp_webhook_intouch`, volver a
+Cavem **no requiere entrar a Meta**. El dispatcher rutea por
+`phone_number_id`, así que basta con reapuntar esa entrada en su `BOT_MAP`:
+
+```bash
+# en wsp_webhook_intouch/.env, la entrada del número traspasado:
+# BOT_MAP={"<phone_number_id>": "http://host.docker.internal:8030/internal/webhook"}
+cd /home/admincrm/wsp_webhook_intouch
+docker compose up -d web   # NUNCA `restart`: no relee el .env
+```
+
+Cavem ya tiene el `WEBHOOK_INTERNAL_TOKEN` puesto para que esto funcione
+— verificado: `/internal/webhook` responde 200 con el token correcto y 403
+sin él. Confirmar en los logs del dispatcher: `dispatched … status=200`.
+
+Sólo si el propio dispatcher estuviera comprometido o inalcanzable, el
+camino caro es entrar al panel de Meta y reapuntar el webhook a
+`/cavem/webhook` directamente — el rollback de último recurso, no el
+primero.
 
 Nada de esto borra datos de Cavem: su schema, sus conversaciones, sus leads y
 sus volúmenes de media quedan donde están.

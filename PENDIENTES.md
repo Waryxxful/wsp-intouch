@@ -49,13 +49,25 @@ El handshake de verificación ya funciona por nginx (probado):
 
 ### 0.2 Verificar que entra por InTouch
 
-Después de repuntar, mandar un mensaje real al número y confirmar:
+Después de repuntar, mandar un mensaje real al número y confirmar. **Ojo:**
+Meta ya no le habla al bot directo — le habla al dispatcher
+`wsp_webhook_intouch` (puerto 6030), que valida la firma y reenvía. Por
+eso el criterio viejo (`POST /webhook` con user-agent de Meta, en los logs
+del bot) ya no aplica en ninguna de sus dos mitades: lo que el bot recibe
+es `POST /internal/webhook`, y el user-agent que ve siempre es
+`python-httpx` — nunca Meta, porque Meta nunca le habla directo.
+
+El criterio real:
 
 ```bash
-docker compose -f /home/admincrm/wsp_intouch/docker-compose.yml logs -f web | grep -E "POST /webhook|wa_id"
+# en los logs del DISPATCHER, no del bot:
+docker compose -f /home/admincrm/wsp_webhook_intouch/docker-compose.yml logs -f web | grep dispatched
 ```
 
-Tiene que aparecer un `POST /webhook` con user-agent de Meta (no `curl`).
+Tiene que aparecer `dispatched phone_id=… status=200`.
+
+Y la prueba concluyente, en la base del bot: que aparezca una `Conversation`
+nueva para el `wa_id` que mandó el mensaje.
 
 ### 0.3 Apagar Cavem — **tres capas, todas reversibles**
 

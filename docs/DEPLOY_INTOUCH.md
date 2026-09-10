@@ -245,7 +245,7 @@ location /wsp/intouch/ {
 
 # --- Webhook Meta WhatsApp de InTouch (sólo si el número tiene Meta App propia) ---
 location = /intouch/webhook {
-  proxy_pass http://127.0.0.1:8040/webhook;
+  proxy_pass http://127.0.0.1:6030/webhook;
   proxy_set_header Host $host;
   proxy_set_header X-Forwarded-Proto $scheme;
 }
@@ -261,11 +261,16 @@ Tres detalles no obvios:
    un `location` tira abajo *todos* los del `server` para ese location, así
    que HSTS, CSP y Permissions-Policy se repiten literales en el bloque de la
    SPA (no alcanza con heredarlos del bloque `server`).
-3. El `location = /intouch/webhook` (match exacto, para ganarle al catch-all
-   de la SPA) sólo se agrega **si el número tiene Meta App propia**. Si entra
-   en la App del dispatcher `wsp_webhook`, en cambio se registra su
-   `phone_number_id` en el `BOT_MAP` de `wsp_webhook` y **no** se agrega este
-   location — ver sección 8.
+3. El `location = /intouch/webhook` apunta al dispatcher `wsp_webhook_intouch`
+   (puerto 6030), no al bot directo: valida la firma HMAC de la App de Meta
+   de InTouch y reenvía según `phone_number_id` con el header
+   `X-Internal-Token` que el bot exige en `/internal/webhook`. Y el
+   `proxy_pass` va **con** el path `/webhook`: sin él, nginx pasa la URI
+   original completa y el dispatcher, que sólo sirve `/webhook`, devuelve 404
+   en vez de 403 (medido). El `BOT_MAP` que importa acá es el de
+   `wsp_webhook_intouch` — **no** el de `wsp_webhook`, que es el dispatcher
+   del otro portfolio comercial (puerto 6020) y no tiene nada que ver con el
+   número de InTouch — ver sección 8.
 
 Después de editar:
 
@@ -290,9 +295,11 @@ fire-and-forget y se traga todas las excepciones** (`utils/
 dios_registration.py`): la ausencia de errores en el log no confirma nada.
 **Se verifica a mano en el panel SA.**
 
-**Meta:** webhook a `https://qadash.in-touchcrm.cl/wsp/intouch/webhook` (o,
-si el número entra en la App del dispatcher, el `BOT_MAP` de `wsp_webhook` en
-vez de un location propio — ver sección 7 punto 3), con el
+**Meta:** webhook a `https://qadash.in-touchcrm.cl/intouch/webhook`, que
+nginx reenvía al dispatcher `wsp_webhook_intouch` (puerto 6030, ver sección 7
+punto 3); el `phone_number_id` se registra en su `BOT_MAP`, no en el de
+`wsp_webhook` (ese es el dispatcher del otro portfolio comercial, puerto
+6020, sin relación con el número de InTouch). Verificación con el
 `WHATSAPP_VERIFY_TOKEN` del `.env.docker`. Sin campañas salientes no hacen
 falta plantillas; si en algún momento las hay, se crean en idioma **`es`**,
 nunca `es_CL` (Meta responde `132001` con `es_CL`).

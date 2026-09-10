@@ -114,9 +114,23 @@ respuesta a alguien **sin credencial**.
 ## Grupo D — E2E conectado: **EJECUTADO 2026-09-10**
 
 Corrido en coordinación entre las dos sesiones, con autorización explícita del
-usuario en **cada** sesión por separado. El emisor llamó a
-`_despachar_si_corresponde(wa_id)` — el camino real de producción — no a
-`_enviar_al_sink` a mano.
+usuario en **cada** sesión por separado. **Dos corridas**, y la segunda existe
+por una corrección:
+
+- **Corrida 1** — el script del emisor llamaba primero a `_enviar_al_sink` a
+  mano y después a `_despachar_si_corresponde`. Así que el `201` de creación lo
+  hizo la llamada manual, y el camino de producción tomó la rama de **replay**.
+  La primera versión de este documento decía que el 201 venía del camino real:
+  **era incorrecto**, y lo corrigió la sesión del emisor.
+- **Corrida 2** — sólo `_despachar_si_corresponde`, sin llamada manual previa.
+  Ids nuevos, así que **creación real** por el camino que corre en producción.
+
+El resultado combinado es mejor que lo planeado: **las dos ramas del emisor
+observadas contra el receptor real**, creación y replay.
+
+Lo que destapó la imprecisión fue el `200` de 15,3 ms del que nadie esperaba —
+o sea que un dato inesperado en el log fue el síntoma de que la secuencia no
+probaba lo que se afirmaba.
 
 Fixture, elegido para que no pueda confundirse con nada real: teléfono
 `56900000E2E` (con letras, inválido como número de WhatsApp), correo
@@ -125,19 +139,22 @@ Fixture, elegido para que no pueda confundirse con nada real: teléfono
 
 | ID | Prueba | Esperado | Observado | Estado |
 |---|---|---|---|---|
-| D01 | Lead del emisor real → pipeline | 201 con los tres ids | `201` en 197,5 ms. `status: created`, `contactId=cmtvie2h5…`, `dealId=cmtvie2hg…`. **El emisor selló esos mismos ids** en `crm_contact_id` y `crm_deal_id` | **PASS** |
+| D01 | Lead del emisor → pipeline, por `_enviar_al_sink` | 201 con los tres ids | Corrida 1: `201` en 197,5 ms, `status: created`. El emisor selló esos ids | **PASS** |
+| D01b | **Creación por el camino de producción** (`_despachar_si_corresponde`, sin llamada manual) | 201 con ids nuevos | Corrida 2: `201` en **158,4 ms**, `contactId=cmtviiu8r…`, `dealId=cmtviiu8z…` — ids distintos de la corrida 1, así que fue creación y no replay. Sellados en `crm_contact_id`/`crm_deal_id` | **PASS** |
 | D02 | Los 22 campos preservados | Todos presentes | **14/14** campos dinámicos + los 8 nativos. `usa_ia_actualmente = true` (booleano real). `solicita_*` como dos `TASK` con vencimiento, resumen y siguiente acción en la `NOTE` | **PASS** |
 | D03 | Etapa y dueño | `QUALIFIED_TO_BUY`, dueño configurado | `QUALIFIED_TO_BUY`, `tomasvalenzuela@in-touchcrm.cl` | **PASS** |
-| D04 | **Replay con el emisor real** | 200, sin efectos | Llegaron **dos** peticiones: `201` en 197,5 ms y `200` en **15,3 ms**. 13× más rápido porque no hace trabajo. 1 contacto, 1 oportunidad | **PASS** |
+| D04 | **Replay por el camino de producción** | 200, sin efectos | Corrida 1: `200` en **15,3 ms** contra los 197,5 de la creación — 13× más rápido porque sale en el chequeo de estado sin resolver identidad ni escribir. 1 contacto, 1 oportunidad | **PASS** |
 | D05 | Array estructurado | Reconstruible | `["whatsapp","voz","email"]` íntegro en `payload` | **PASS** |
 | D06 | El emisor usa `urllib`, no `requests` | stdlib | `userAgent: Python-urllib/3.11` | **PASS** |
 | D07 | Dominio reservado no crea empresa por dominio | `domain: null` | `null` — `domainFromEmail` de upstream rechaza `.invalid` por su lista de sufijos de máquina | **PASS** |
-| D08 | Limpieza de los datos de prueba | Cero en las dos bases | `QAIntouch`: 0 conversaciones, 0 leads (limpiado por `wa_id` exacto). CRM: 0 contactos, 0 empresas, 0 oportunidades | **PASS** |
+| D08 | Limpieza de los datos de prueba, las dos corridas | Cero en las dos bases | `QAIntouch`: 0 conversaciones, 0 leads. CRM: 0 contactos, 0 empresas, 0 oportunidades, 0 actividades. Borrado por los ids del evento, nunca por prefijo | **PASS** |
 | D09 | Conversación real de WhatsApp | — | **NO EJECUTADO** — credenciales de Meta, y el traspaso del número es un despliegue con el usuario |
 
-**D04 no estaba en el plan de la prueba.** El emisor mandó dos veces y eso
-ejercitó el camino de replay con el código real: la segunda tardó 13 veces
-menos, que es la evidencia de que no vuelve a resolver identidad ni a escribir.
+**D04 no estaba en el plan de la prueba, y su valor fue doble.** Además de
+probar el replay con el código real, ese `200` inesperado fue **el síntoma de
+que la corrida 1 no probaba lo que se afirmaba** — de ahí salió la corrida 2 y
+la corrección de D01. Un dato que no se esperaba en un log valió más que la
+prueba planeada.
 
 **D07 es un reuso que se pagó solo**: `domainFromEmail` de upstream ya descarta
 los dominios de máquina, y `.invalid` está en su lista de sufijos. Sin eso, el

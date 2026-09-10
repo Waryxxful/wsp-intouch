@@ -534,6 +534,15 @@ git diff HEAD~1 HEAD | grep -iE "password|secret|crm_" | grep -v "crm_app\|crm_t
 
 ### Task 2: El principal de ingesta y su API key
 
+> **HECHA, Y SU RESULTADO CAMBIÓ EL DISEÑO.** La medición del Step 4 mostró
+> que una API key del framework abre toda la API, así que la key se **revocó**
+> y la credencial pasó a ser un secreto dedicado — ver Task 9. Los pasos de
+> abajo quedan porque son **la medición**, que es lo que hay que repetir si
+> alguien vuelve a proponer autenticar con API key.
+>
+> El usuario de servicio `bot-intouch@in-touchcrm.cl` quedó creado pero **sin
+> uso**: no hace falta para el diseño actual. Se puede borrar.
+
 **Files:**
 - Create: `/home/admincrm/compai-crm/tools/seed-ingest-principal.ts`
 - Modify: `/home/admincrm/compai-crm/.env` (rellenar `INTOUCH_INGEST_USER_ID`)
@@ -3126,518 +3135,138 @@ Ningun resultado exitoso puede llevar contactId vacio."
 
 ### Task 9: El endpoint y su alcance
 
+> **HECHA. Commit `b7d64d4` en `compai-crm`.** Esta sección se reescribió
+> **después** de implementarla, porque el diseño de la credencial cambió por
+> una medición y la versión anterior describía algo que resultó inseguro.
+> Quien la lea ahora lee lo que existe.
+
 **Files:**
-- Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest.controller.ts`
-- Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest.module.ts`
-- Modify: `/home/admincrm/compai-crm/apps/api/src/app.module.ts` (agregar `IngestModule` a `imports`)
-- Modify: `/home/admincrm/compai-crm/apps/api/src/create-app.ts` (parser JSON acotado a la ruta de ingesta)
-- Modify: `/home/admincrm/compai-crm/apps/api/src/config/env.validation.ts` (agregar `INTOUCH_INGEST_USER_ID` e `INTOUCH_LEAD_OWNER_EMAIL`)
-- Create: `/home/admincrm/compai-crm/apps/api/test/ingest-endpoint.spec.ts`
+- Create: `apps/api/src/ingest/ingest-secret.guard.ts`
+- Create: `apps/api/src/ingest/ingest-body.ts`
+- Create: `apps/api/src/ingest/ingest.controller.ts`
+- Create: `apps/api/src/ingest/ingest.module.ts`
+- Modify: `apps/api/src/app.module.ts`, `apps/api/src/create-app.ts`, `apps/api/src/config/env.validation.ts`
+- Test: `apps/api/test/ingest-endpoint.spec.ts`
 
 **Interfaces:**
 - Consumes: `IngestService` (Task 8), `leadInTouchSchema` y `MAX_INGEST_BODY_BYTES` (Task 5).
-- Produces: `POST /api/ingest/intouch-lead`.
+- Produces: `POST /api/ingest/intouch-lead`; `INGEST_HEADER = "x-intouch-ingest-key"`; `IngestSecretGuard`; `middlewareCuerpoIngesta(maxBytes)`.
 
-**Lo que la Task 2 dejó verificado y acá se usa:** una API key **no tiene alcance propio**. El alcance se pone acá, explícito, y se comprueba con cinco casos.
+#### La credencial: por qué NO es una API key del framework
 
-**Y una trampa verificada en `create-app.ts`:** la app Nest arranca con **`bodyParser: false`** y no registra ningún parser propio. O sea que **`@Body()` llega `undefined`** en un controlador REST común — es exactamente por eso que `tracking.controller.ts` lee el body crudo desde `@Req()` con un zod que acepta string o JSON. Así que la ruta de ingesta necesita su propio parser, acotado a ella (Step 4). Sin eso el endpoint falla en el primer request y el síntoma parece un problema de validación.
+El plan mandaba **medir** el alcance de la key antes de elegir. Se midió, contra
+la instalación real, y salió mal:
 
-- [ ] **Step 1: Escribir el test que falla**
+| Ruta, con la key del usuario de servicio | Resultado |
+|---|---|
+| `POST /rest/contacts/search` | **200** — lee contactos |
+| `POST /rest/companies/search` | **200** — lee empresas |
+| `POST /rest/deals/search` | **200** — lee oportunidades |
+| `POST /rest/contacts` | **200** — **crea** un contacto |
+| las mismas sin la key | 401 |
 
-```typescript
-// apps/api/test/ingest-endpoint.spec.ts
-import { beforeAll, describe, expect, test } from "bun:test";
-import { db } from "@crm/db";
-import request from "supertest";
-import { createApp } from "../src/create-app";
+Las keys se crean sin `permissions` y `enableSessionForAPIKeys: true` las vuelve
+equivalentes a su usuario dueño: **chequear el id del usuario en un endpoint no
+limita las otras rutas**. La key emitida se revocó y el contacto de prueba se
+borró.
 
-let servidor: unknown;
-let keyDeIngesta: string;
-let keyDeOtro: string;
-let cookieDeComercial: string;
+Se tomó la segunda vía: `INTOUCH_INGEST_SECRET`, un secreto dedicado que
+verifica un guard que corre **sólo** en `/api/ingest`, con comparación de tiempo
+constante y rate limit propio (el del plugin está apagado, y esta ruta no pasa
+por el gateway).
 
-function cuerpo(over: Record<string, unknown> = {}) {
-	return {
-		origen: "wsp_intouch",
-		clave_contacto: "f".repeat(32),
-		evento_id: crypto.randomUUID(),
-		revision: 1,
-		telefono: "56900000930",
-		nombre_completo: "PRUEBA INTEGRACIÓN Ana",
-		empresa: "PRUEBA INTEGRACIÓN Endpoint SpA",
-		lead_score: "WARM",
-		solicita_consultoria: false,
-		solicita_contacto_humano: false,
-		...over,
-	};
-}
+Y el alcance queda exacto en las **dos** direcciones. La segunda es
+estructural: el middleware **descarta la cabecera `x-api-key`** antes de que
+Better Auth la vea, así que una key del framework no abre la ingesta ni aunque
+el guard tuviera un error.
 
-describe("POST /api/ingest/intouch-lead", () => {
-	beforeAll(async () => {
-		const app = await createApp();
-		await app.init();
-		servidor = app.getHttpServer();
-		// Las dos keys se preparan con el mismo API de servidor que la Task 2.
-		keyDeIngesta = process.env.TEST_INGEST_KEY ?? "";
-		keyDeOtro = process.env.TEST_OTHER_USER_KEY ?? "";
-		cookieDeComercial = process.env.TEST_SESSION_COOKIE ?? "";
-		expect(keyDeIngesta).not.toBe("");
-		expect(keyDeOtro).not.toBe("");
-		expect(cookieDeComercial).not.toBe("");
-	});
+**Decisión más amplia, que queda para el usuario**: `enableSessionForAPIKeys`
+afecta a TODAS las keys del CRM. Cualquier key que un usuario cree en Settings
+abre la API completa con su identidad. Apagarlo endurecería la instalación
+entera pero cambia una función que upstream ofrece. No se toca sin decisión.
 
-	test("la key de ingesta NO sirve para leer el resto del CRM", async () => {
-		// La comprobación que decide si la credencial está realmente acotada.
-		// Una key de usuario con acceso total, verificada sólo en esta ruta,
-		// sigue sirviendo para leer contactos por cualquier otra.
-		for (const ruta of [
-			"/api/contacts.list", "/api/companies.list",
-			"/api/users.list", "/api/deals.list",
-		]) {
-			const r = await request(servidor).get(ruta).set("x-api-key", keyDeIngesta);
-			expect([401, 403, 404]).toContain(r.status);
-		}
-	});
+#### Tres cosas que costó medir, y están comentadas en el código
 
-	test("con la key del principal de ingesta: 201 con ids", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.send(cuerpo());
-		expect(r.status).toBe(201);
-		expect(r.body.status).toBe("created");
-		expect(r.body.contactId).toBeTruthy();
-	});
+1. **`express` no es dependencia de `apps/api`** — es transitiva de
+   `platform-express`, y bun la rechaza con `Cannot find package 'express'`. Y
+   el parser global de Nest tampoco sirve: `bodyParser: false` está puesto a
+   propósito porque Better Auth y el puente tRPC leen el stream crudo, y un
+   parser global se los consume. Por eso `ingest-body.ts`, de ~40 líneas y
+   acotado a la ruta.
 
-	test("con la key VÁLIDA DE OTRO USUARIO: 403", async () => {
-		// El caso que pasaría en silencio si se asumiera que las keys tienen
-		// permisos. No los tienen: una key equivale a ser su usuario dueño.
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeOtro)
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect(r.status).toBe(403);
-	});
+2. **Responder 413 cortando la lectura PIERDE la respuesta.** El cliente sigue
+   subiendo, la conexión se resetea, y llega un **200 con cuerpo vacío** — el
+   síntoma es desconcertante porque el servidor sí escribió el 413. La salida
+   es drenar el stream hasta el final **descartando**: la memoria queda acotada
+   igual.
 
-	test("sin key: 401", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect(r.status).toBe(401);
-	});
+3. **Una `x-api-key` inválida hace que Better Auth lance `APIError`**, y Nest la
+   traduce a **500**. Para el emisor eso es peor que un rechazo: lee 5xx como
+   transitorio y reintentaría para siempre contra algo que no se arregla solo.
 
-	test("con una key inventada: 401", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", "crm_inventada_0000000000")
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect(r.status).toBe(401);
-	});
+#### El contrato de respuesta
 
-	test("cookie de sesión VÁLIDA + key inventada: rechazo", async () => {
-		// El caso que confunde identidades: si el guard resuelve la sesión de la
-		// cookie cuando la key no sirve, una key basura pasaría siempre que el
-		// navegador traiga una sesión -- y peor, con la identidad de esa persona.
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", "crm_inventada_0000000000")
-			.set("Cookie", cookieDeComercial)
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect([401, 403]).toContain(r.status);
-	});
+| HTTP | `status` | Cuándo |
+|---|---|---|
+| 201 | `created` | Primera aplicación de ese vínculo |
+| 200 | `updated` | Revisión nueva aplicada |
+| 200 | `replayed` | Evento idéntico ya aplicado; mismos ids, cero efectos |
+| 400 | `invalid` | Contrato inválido; errores por campo, sin eco de valores |
+| 401 | — | Credencial ausente o inválida |
+| 409 | `conflict` / `stale` | Identidad ambigua, o revisión anterior a la aplicada |
+| 413 | `invalid` | Cuerpo excesivo |
+| 415 | — | Tipo no admitido |
+| 429 | — | Límite del receptor |
+| 503 | `unavailable` | Dueño de leads sin configurar |
 
-	test("sólo cookie de comercial, sin key: rechazo", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("Cookie", cookieDeComercial)
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect([401, 403]).toContain(r.status);
-	});
+**El 503 y no 409 para el dueño faltante es deliberado**: el emisor clasifica
+por código HTTP (§2.5 del spec), y 503 es transitorio — se arregla solo al
+configurarlo — mientras 409 significa "esperá a una persona".
 
-	test("Content-Type no admitido: 415", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.set("Content-Type", "text/plain")
-			.send("origen=wsp_intouch");
-		expect(r.status).toBe(415);
-	});
+#### Los 14 tests, y los tres que son bloqueantes
 
-	test("sin dueño configurado: 503, no 409", async () => {
-		// El diseño anterior documentaba 503 y lanzaba ConflictException.
-		// El emisor clasifica: 503 es reintentable, 409 es intervención humana.
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.set("x-test-sin-dueno", "1")   // el fixture desconfigura el dueño
-			.send(cuerpo({ evento_id: crypto.randomUUID() }));
-		expect(r.status).toBe(503);
-	});
+`apps/api/test/ingest-endpoint.spec.ts`. Si alguno de estos tres falla, **no se
+sigue**:
 
-	test("JSON inválido: 400, no 500", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.set("Content-Type", "application/json")
-			.send("{esto no es json");
-		expect(r.status).toBe(400);
-	});
+- *con el secreto correcto pero en el header de API key → 401*: si pasa, el
+  alcance no está acotado en su segunda dirección.
+- *sin credencial → 401*: obvio, pero es la base.
+- *un secreto de largo distinto → 401*: que la comparación de tiempo constante
+  no reviente con largos distintos.
 
-	test("un body enorme: 413, sin escritura parcial", async () => {
-		const antes = await db.leadIngestEvent.count();
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.send(cuerpo({ resumen_conversacion: "x".repeat(200_000) }));
-		expect([400, 413]).toContain(r.status);
-		expect(await db.leadIngestEvent.count()).toBe(antes);
-	});
+Los demás cubren 400 con JSON inválido, 415, 413 con 200 KB, campo inválido sin
+eco del valor, clave interna en el body, replay con los mismos ids, conflicto
+409, COLD con `dealId: null`, y que todo éxito lleve `contactId` no vacío.
 
-	test("un campo inválido: 400 con el nombre del campo y sin datos sensibles", async () => {
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.send(cuerpo({ lead_score: "TIBIO" }));
-		expect(r.status).toBe(400);
-		expect(JSON.stringify(r.body)).toContain("lead_score");
-		expect(JSON.stringify(r.body)).not.toContain("postgresql://");
-	});
-
-	test("un conflicto de idempotencia: 409", async () => {
-		const base = cuerpo({ evento_id: crypto.randomUUID() });
-		await request(servidor).post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta).send(base);
-		const r = await request(servidor).post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta).send({ ...base, empresa: "Otra SpA" });
-		expect(r.status).toBe(409);
-	});
-
-	test("un replay: 200 con los mismos ids", async () => {
-		const base = cuerpo({ evento_id: crypto.randomUUID() });
-		const primero = await request(servidor).post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta).send(base);
-		const segundo = await request(servidor).post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta).send(base);
-		expect(segundo.status).toBe(200);
-		expect(segundo.body.status).toBe("replayed");
-		expect(segundo.body.contactId).toBe(primero.body.contactId);
-	});
-
-	test("un lead COLD responde éxito con dealId null", async () => {
-		// El emisor tiene que aceptar esto como éxito: la política crea
-		// contactos sin oportunidad a propósito.
-		const r = await request(servidor)
-			.post("/api/ingest/intouch-lead")
-			.set("x-api-key", keyDeIngesta)
-			.send(cuerpo({
-				evento_id: crypto.randomUUID(), clave_contacto: "a1".repeat(16),
-				telefono: "56900000931", lead_score: "COLD",
-			}));
-		expect(r.status).toBe(201);
-		expect(r.body.contactId).toBeTruthy();
-		expect(r.body.dealId).toBeNull();
-	});
-});
-```
-
-- [ ] **Step 2: Correrlo**
+- [ ] **Correr los tests**
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose -f docker-compose.crm.yml run --rm tools bun test apps/api/test/ingest-endpoint.spec.ts
-```
-
-Expected: FAIL — la ruta devuelve 404.
-
-- [ ] **Step 3: Escribir el controlador**
-
-```typescript
-// apps/api/src/ingest/ingest.controller.ts
-//
-// El receptor de leads de wsp_intouch.
-//
-// SOBRE EL ALCANCE, que es el punto delicado: omitir @AllowAnonymous() hace
-// que el guard exija sesión, pero eso NO acota nada. Verificado en
-// packages/auth/src/auth.ts: las keys se crean sin `permissions` y
-// `enableSessionForAPIKeys: true` las vuelve equivalentes a su usuario dueño.
-// Sin los dos chequeos de abajo, la key de CUALQUIER usuario del CRM podría
-// crear leads.
-import { API_KEY_HEADER } from "@crm/auth";
-import type { Db } from "@crm/db";
-import {
-	BadRequestException, Body, ConflictException, Controller, ForbiddenException,
-	Headers, HttpCode, Logger, Post, Req, Res, ServiceUnavailableException,
-	UnauthorizedException, UnsupportedMediaTypeException,
-} from "@nestjs/common";
-import { ConfigService } from "@nestjs/config";
-import {
-	ApiConflictResponse, ApiCreatedResponse, ApiForbiddenResponse, ApiHeader,
-	ApiOkResponse, ApiOperation, ApiTags,
-} from "@nestjs/swagger";
-import { Session, type UserSession } from "@thallesp/nestjs-better-auth";
-import type { Request, Response } from "express";
-import type { EnvironmentVariables } from "../config/env.validation";
-import { InjectDatabase } from "../database/database.constants";
-import { leadInTouchSchema, MAX_INGEST_BODY_BYTES } from "./ingest.contracts";
-import { IngestService } from "./ingest.service";
-
-@ApiTags("Ingest")
-@Controller("api/ingest")
-export class IngestController {
-	private readonly logger = new Logger(IngestController.name);
-
-	constructor(
-		@InjectDatabase() private readonly db: Db,
-		private readonly ingest: IngestService,
-		private readonly config: ConfigService<EnvironmentVariables, true>,
-	) {}
-
-	@Post("intouch-lead")
-	@HttpCode(200)
-	@ApiOperation({
-		summary: "Recibe un lead calificado por el bot comercial de InTouch",
-	})
-	@ApiHeader({ name: API_KEY_HEADER, required: true })
-	@ApiCreatedResponse({ description: "Lead creado" })
-	@ApiOkResponse({ description: "Replay o actualización" })
-	@ApiForbiddenResponse({ description: "La credencial no es la de ingesta" })
-	@ApiConflictResponse({ description: "Conflicto de idempotencia o de identidad" })
-	async intouchLead(
-		@Session() sesion: UserSession,
-		@Headers(API_KEY_HEADER) apiKey: string | undefined,
-		@Body() body: unknown,
-		@Req() req: Request,
-		@Res({ passthrough: true }) res: Response,
-	) {
-		// 1. Tiene que venir por API key. Una sesión de cookie de navegador NO
-		// sirve: el espejo de SessionOnlyMiddleware, para que el navegador de un
-		// comercial autenticado no pueda postear leads.
-		//
-		// Y el chequeo va ANTES de mirar `sesion`: si la key es inválida, el
-		// guard puede haber resuelto la sesión desde la COOKIE, y entonces
-		// `sesion.user` es el comercial, no la integración. Sin este orden, una
-		// key basura pasaría siempre que el navegador traiga sesión.
-		if (!apiKey) {
-			throw new UnauthorizedException(
-				"Esta ruta se usa sólo con credencial de integración.",
-			);
-		}
-		const tipo = (req.headers["content-type"] ?? "").split(";")[0].trim();
-		if (tipo !== "application/json") {
-			throw new UnsupportedMediaTypeException(
-				"Esta ruta acepta sólo application/json.",
-			);
-		}
-
-		// 2. Y tiene que ser la key del principal de ingesta. Las keys del CRM no
-		// llevan permisos: sin esto, la de cualquier usuario serviría.
-		// Que la sesión provenga de la KEY y no de la cookie: si el guard
-		// resolvió una sesión de navegador, esto la descarta.
-		const principal = this.config.get("INTOUCH_INGEST_USER_ID", { infer: true });
-		if (!principal || sesion.user.id !== principal) {
-			this.logger.warn({
-				message: "Credencial fuera de alcance en la ingesta de InTouch",
-				userId: sesion.user.id,
-			});
-			throw new ForbiddenException("Esta credencial no puede ingerir leads.");
-		}
-
-		// Cinturón, no la primera defensa: el `express.json({ limit })` de
-		// create-app ya rechaza con 413 antes de parsear. Esto cubre el caso de
-		// que alguien saque ese parser sin darse cuenta.
-		const tamano = Buffer.byteLength(JSON.stringify(body ?? {}), "utf8");
-		if (tamano > MAX_INGEST_BODY_BYTES) {
-			res.status(413);
-			return { status: "error", message: "El cuerpo excede el tamaño permitido." };
-		}
-
-		const analizado = leadInTouchSchema.safeParse(body);
-		if (!analizado.success) {
-			// Errores por campo, sin nada sensible: nunca error.message crudo,
-			// SQL, stack ni secretos.
-			throw new BadRequestException({
-				status: "invalid",
-				errores: analizado.error.issues.map((i) => ({
-					campo: i.path.join("."),
-					problema: i.message,
-				})),
-			});
-		}
-
-		const ownerId = await this.dueno();
-		const resultado = await this.ingest.ingerir(analizado.data, ownerId);
-
-		if (resultado.estado === "conflict") throw new ConflictException({
-			status: "conflict", motivo: resultado.motivo,
-		});
-		if (resultado.estado === "stale") throw new ConflictException({
-			status: "stale", motivo: resultado.motivo,
-		});
-
-		if (resultado.estado === "created") res.status(201);
-
-		return {
-			status: resultado.estado,
-			companyId: resultado.companyId,
-			contactId: resultado.contactId,
-			dealId: resultado.dealId,
-			revision: resultado.revision,
-			eventoId: resultado.eventoId,
-		};
-	}
-
-	/// El dueño de los leads del bot. `Deal.ownerId` es obligatorio, y no se
-	/// improvisa: si no está configurado o no existe, se responde 503 y el lead
-	/// queda pendiente en el emisor, que lo reintentará con la misma clave.
-	private async dueno(): Promise<string> {
-		const correo = this.config.get("INTOUCH_LEAD_OWNER_EMAIL", { infer: true });
-		const usuario = correo
-			? await this.db.user.findUnique({
-					where: { email: correo }, select: { id: true },
-				})
-			: null;
-		if (!usuario) {
-			this.logger.error({
-				message: "INTOUCH_LEAD_OWNER_EMAIL no resuelve a un usuario del CRM",
-			});
-			// 503 DE VERDAD. El diseño anterior documentaba 503 y lanzaba
-			// ConflictException, o sea 409 -- y el emisor clasifica por status:
-			// 503 es transitorio y se reintenta, 409 es intervención humana. Un
-			// 409 acá dejaba el lead esperando a una persona por un problema de
-			// configuración que se arregla solo al configurarla.
-			throw new ServiceUnavailableException({
-				status: "unavailable",
-				motivo: "El dueño de los leads no está configurado en el CRM.",
-			});
-		}
-		return usuario.id;
-	}
-}
-```
-
-- [ ] **Step 4: Registrar el parser JSON de la ruta de ingesta**
-
-En `apps/api/src/create-app.ts`, después de `app.use(helmet())` y **antes** de `app.init()`, agregar:
-
-```typescript
-	// La app arranca con bodyParser: false (arriba), así que @Body() llegaría
-	// undefined. Este parser va ACOTADO a la ruta de ingesta y no global, para
-	// no cambiar cómo llegan los cuerpos al resto de la API -- el puente REST
-	// de tRPC y el handler de Better Auth leen los suyos a su manera.
-	//
-	// El `limit` es lo que hace que un cuerpo enorme se rechace ANTES de
-	// parsearlo: express responde 413 solo, sin cargarlo en memoria.
-	app.use(
-		"/api/ingest",
-		express.json({ limit: MAX_INGEST_BODY_BYTES, type: "application/json" }),
-	);
-```
-
-Y los imports que hacen falta arriba del archivo:
-
-```typescript
-import express from "express";
-import { MAX_INGEST_BODY_BYTES } from "./ingest/ingest.contracts";
-```
-
-Verificar que el 413 sale de verdad y no un 500:
-
-```bash
-cd /home/admincrm/compai-crm
-docker compose up -d api
-python3 -c "print('{"x":"' + 'a'*200000 + '"}')" > /tmp/grande.json
-curl -s -o /dev/null -w '%{http_code}
-' -X POST \
-  -H 'Content-Type: application/json' -H "x-api-key: $KEY" \
-  --data @/tmp/grande.json \
-  http://127.0.0.1:3006/api/ingest/intouch-lead
-```
-
-Expected: `413`.
-
-- [ ] **Step 5: Escribir el módulo y registrarlo**
-
-```typescript
-// apps/api/src/ingest/ingest.module.ts
-import { Module } from "@nestjs/common";
-import { IngestController } from "./ingest.controller";
-import { IngestIdentityService } from "./ingest-identity.service";
-import { IngestService } from "./ingest.service";
-import { IngestWriteService } from "./ingest-write.service";
-
-@Module({
-	controllers: [IngestController],
-	providers: [IngestService, IngestIdentityService, IngestWriteService],
-	exports: [IngestService],
-})
-export class IngestModule {}
-```
-
-En `apps/api/src/app.module.ts`, agregar el import y sumarlo al array `imports`:
-
-```typescript
-import { IngestModule } from "./ingest/ingest.module";
-// … y dentro de imports: [ … , IngestModule ],
-```
-
-En `apps/api/src/config/env.validation.ts`, agregar las dos variables al esquema existente (opcionales, porque el CRM tiene que arrancar sin ellas y fallar sólo al ingerir):
-
-```typescript
-INTOUCH_INGEST_USER_ID: z.string().optional(),
-INTOUCH_LEAD_OWNER_EMAIL: z.string().email().optional(),
-```
-
-- [ ] **Step 6: Preparar las dos keys de prueba y correr los tests**
-
-```bash
-cd /home/admincrm/compai-crm
-# La key del principal de ingesta ya existe (Task 2). La del "otro usuario"
-# se crea igual, con otro correo, para el caso de 403.
-docker compose exec api bun tools/seed-ingest-principal.ts   # reusa la existente
 docker compose -f docker-compose.crm.yml run --rm \
-  -e TEST_INGEST_KEY="$(cat /tmp/lead_sink_token)" \
-  -e TEST_OTHER_USER_KEY="<key de otro usuario>" \
-  -e TEST_SESSION_COOKIE="<cookie de sesión de un comercial de prueba>" \
-  tools bun test apps/api/test/ingest-endpoint.spec.ts
+  -e INTOUCH_INGEST_SECRET="$(grep -oP '(?<=^INTOUCH_INGEST_SECRET=).*' .env)" \
+  -e INTOUCH_LEAD_OWNER_EMAIL="dueno-endpoint@example.com" \
+  -e BETTER_AUTH_SECRET="secreto-solo-para-tests-0123456789abcdef" \
+  -e ALLOWED_SIGN_IN="example.com" \
+  tools sh -c 'cd apps/api && bun test test/ingest-endpoint.spec.ts'
 ```
 
-Expected: PASS, los 16. **Tres son bloqueantes si fallan**, no detalles:
+`createApp()` valida el entorno al arrancar, así que la suite necesita
+`BETTER_AUTH_SECRET` y `ALLOWED_SIGN_IN` — valores de prueba, no los reales.
 
-- *key válida de otro usuario → 403*: sin esto la credencial de cualquiera ingiere.
-- *cookie válida + key inventada → rechazo*: si pasa, el guard está usando la identidad de la cookie.
-- *la key de ingesta no lee el resto del CRM*: si lee, la credencial no está acotada y hay que volver al Step 4 de la Task 2.
+- [ ] **Verificar contra la API real, no sólo en la suite**
 
-- [ ] **Step 7: Poner el rate limit en el gateway**
-
-El plugin `apiKey` tiene `rateLimit: { enabled: false }`, así que el límite va en nginx. En `/home/admincrm/gateway/nginx.conf`, junto a la zona `login` que ya existe:
-
-```nginx
-limit_req_zone $binary_remote_addr zone=ingest:10m rate=60r/m;
-```
-
-Y en el bloque de la Task 14 se aplica con `limit_req zone=ingest burst=20 nodelay;`.
-
-- [ ] **Step 8: Commit**
+`api` es inmutable: hay que **rebuildear** para que tome el código nuevo. Los
+montajes de desarrollo los tiene sólo `tools`.
 
 ```bash
-git add apps/api/src/ingest/ingest.controller.ts \
-        apps/api/src/ingest/ingest.module.ts \
-        apps/api/src/app.module.ts \
-        apps/api/src/create-app.ts \
-        apps/api/src/config/env.validation.ts \
-        apps/api/test/ingest-endpoint.spec.ts
-git commit -m "feat(ingest): endpoint POST /api/ingest/intouch-lead con alcance explicito
-
-Omitir @AllowAnonymous() exige sesion pero NO acota: las keys del CRM se
-crean sin permissions y enableSessionForAPIKeys las vuelve equivalentes a
-su usuario dueno. Asi que el controlador exige (a) que venga por x-api-key
-y no por cookie de navegador, y (b) que sea la key del principal de
-ingesta. El caso 'key valida de otro usuario' esta cubierto por un test:
-es el que pasaria en silencio si se asumiera lo contrario.
-
-Sin dueno configurado responde 503 y el lead queda pendiente en el emisor,
-en vez de inventar un dueno."
+docker compose -f docker-compose.crm.yml up -d --build api
+SECRETO=$(grep -oP '(?<=^INTOUCH_INGEST_SECRET=).*' .env)
+curl -s -o /dev/null -w '%{http_code}\n' -X POST -H "x-intouch-ingest-key: $SECRETO" \
+  -H 'Content-Type: application/json' -d '{}' http://127.0.0.1:3006/api/ingest/intouch-lead
 ```
+
+Verificado: `401` sin credencial y con el secreto en el header equivocado,
+`400` con cuerpo inválido, `413` con 200 KB, `415` con `text/plain`.
 
 ---
 
@@ -5162,7 +4791,9 @@ class Corta(http.server.BaseHTTPRequestHandler):
         req = urllib.request.Request(
             DESTINO, data=cuerpo, method="POST",
             headers={"Content-Type": "application/json",
-                     "x-api-key": self.headers.get("x-api-key", "")})
+                     # El secreto de ingesta, NO una API key del framework.
+                     "x-intouch-ingest-key":
+                         self.headers.get("x-intouch-ingest-key", "")})
         try:
             urllib.request.urlopen(req, timeout=20).read()
         except Exception as error:
@@ -5402,6 +5033,21 @@ El bot no pasa por este bloque: le pega directo por la red crm_ingest."
 ---
 
 ### Task 15: Resolver un conflicto sin editar el evento
+
+> **HECHA. Commit `712c47a` en `compai-crm`.** Implementada como
+> `IngestResolveService` con `listar()` y `resolver()`, más cuatro columnas de
+> auditoría en `LeadIngestEvent`. **Falta exponerla por HTTP**: hoy es un
+> servicio, sin router. Cuando se exponga va detrás de la sesión del CRM y no
+> de la credencial del bot — y eso ahora es estructural, porque el middleware
+> de ingesta descarta `x-api-key` y el secreto de ingesta sólo sirve en
+> `/api/ingest`.
+>
+> Un problema de diseño que encontró un test: al forzar la identidad se había
+> puesto la empresa en `ninguna`, así que un lead WARM quedaba sin oportunidad.
+> La ambigüedad era del CONTACTO; la empresa se sigue planificando normal.
+>
+> Y `stale` deja el conflicto **abierto y sin sello de auditoría**: resolver
+> tarde no resolvió nada, la revisión posterior ya cubrió el caso.
 
 **Files:**
 - Create: `/home/admincrm/compai-crm/apps/api/src/ingest/ingest-conflicts.router.ts`

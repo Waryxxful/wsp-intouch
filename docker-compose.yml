@@ -89,6 +89,17 @@ services:
     restart: unless-stopped
 
   # Sidecar cron: barrido de leads pendientes de despacho al CRM.
+    # Redes: `default` va EXPLICITA a proposito. Declarar `networks` en un
+    # servicio reemplaza la red default implicita, asi que omitirla dejaria a
+    # `web` sin la red del proyecto y sin poder hablar con `cron`.
+    # `crm_ingest` es la red externa del CRM (compai-crm): es como el bot
+    # alcanza a `crm-api` para despachar leads (LEAD_SINK). El puerto que sirve
+    # ahi es el 3001 INTERNO -- el 3006 esta publicado en loopback del host y no
+    # se resuelve desde adentro de un contenedor.
+    networks:
+      - default
+      - crm_ingest
+
   # Cada 15 minutos, porque un lead que pidio contacto humano y espera una
   # hora ya perdio su ventana. El comando es barato: sale limpio si no hay
   # nada pendiente o si LEAD_SINK=none.
@@ -121,9 +132,23 @@ services:
                python manage.py despachar_leads_pendientes || true;
                sleep 900;
              done"
+    # Misma red que `web`, y por la MISMA razon: este sidecar corre
+    # `despachar_leads_pendientes`, o sea el reintento de los leads que fallaron
+    # al despacharse en caliente. Sin crm_ingest ese barrido no resuelve
+    # `crm-api` y falla en cada corrida -- justo el camino que existe para
+    # recuperarse de un fallo. `default` explicita por lo mismo que en `web`.
+    networks:
+      - default
+      - crm_ingest
     restart: unless-stopped
     depends_on:
       - web
+
+networks:
+  # Creada por compai-crm, no por este compose: `external` significa que este
+  # proyecto la usa pero no la administra ni la borra con `down`.
+  crm_ingest:
+    external: true
 
 volumes:
   media_data:

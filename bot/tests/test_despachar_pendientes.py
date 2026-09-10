@@ -4,6 +4,7 @@ Sin esto, el despacho solo ocurre cuando llega un turno nuevo: si el envio
 falla y la conversacion termina ahi, el lead no llega nunca. Es la falla que
 el spec §5 punto 4 y las pruebas I09/I10 cubren.
 """
+from datetime import timedelta
 from io import StringIO
 from unittest.mock import patch
 
@@ -118,3 +119,98 @@ class PendientesTest(TestCase):
         with patch("bot.business.lead_intouch._enviar_al_sink") as enviar:
             call_command("despachar_leads_pendientes", stdout=StringIO())
         enviar.assert_not_called()
+
+
+@override_settings(LEAD_SINK="http", LEAD_SINK_URL="http://crm-api:3001/x",
+                   LEAD_SINK_TOKEN="secreto_prueba")
+class ConflictoVencidoTest(TestCase):
+    """La cadencia lenta: un conflicto no se reintenta cada corrida, pero
+    tampoco se excluye para siempre -- se reintenta cuando su marca es más
+    vieja que `--umbral-conflicto-horas`.
+    """
+
+    def test_un_conflicto_reciente_no_se_reintenta(self):
+        _lead("56900000060", empresa="Acme SpA",
+              conflicto_en=timezone.now() - timedelta(hours=1),
+              conflicto_motivo="el correo ya está en otro contacto",
+              evento_id="ya", payload_hash="x", revision=1)
+        with patch("bot.business.lead_intouch._enviar_al_sink") as enviar:
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=StringIO())
+        enviar.assert_not_called()
+
+    def test_un_conflicto_vencido_si_se_reintenta(self):
+        _lead("56900000061", empresa="Acme SpA",
+              conflicto_en=timezone.now() - timedelta(hours=10),
+              conflicto_motivo="el correo ya está en otro contacto",
+              evento_id="ya", payload_hash="x", revision=1)
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "conflicto",
+                                 "motivo": "sigue en conflicto"}) as enviar:
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=StringIO())
+        enviar.assert_called_once()
+
+    def test_un_conflicto_vencido_que_vuelve_a_dar_409_actualiza_su_marca(self):
+        # Sin esto, el mismo lead se reintentaría en TODAS las corridas
+        # siguientes -- justo lo que la cadencia lenta evita.
+        lead = _lead("56900000062", empresa="Acme SpA",
+                     conflicto_en=timezone.now() - timedelta(hours=10),
+                     conflicto_motivo="motivo viejo",
+                     evento_id="ya", payload_hash="x", revision=1)
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "conflicto",
+                                 "motivo": "sigue en conflicto"}):
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=StringIO())
+        lead.refresh_from_db()
+        self.assertEqual(lead.conflicto_motivo, "sigue en conflicto")
+        self.assertGreater(lead.conflicto_en, timezone.now() - timedelta(minutes=1))
+
+        # La corrida siguiente: la marca quedó fresca, así que no se reintenta.
+        with patch("bot.business.lead_intouch._enviar_al_sink") as enviar:
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=StringIO())
+        enviar.assert_not_called()
+
+    def test_un_conflicto_vencido_que_tiene_exito_se_sella_y_limpia_el_conflicto(self):
+        lead = _lead("56900000063", empresa="Acme SpA",
+                     conflicto_en=timezone.now() - timedelta(hours=10),
+                     conflicto_motivo="el correo ya está en otro contacto",
+                     evento_id="ya", payload_hash="x", revision=1)
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "replayed", "contactId": "c9",
+                                           "dealId": None}}) as enviar:
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=StringIO())
+        # El mismo evento_id que ya tenía viaja de nuevo: es un reintento, no
+        # una actualización nueva.
+        self.assertEqual(enviar.call_args[0][0]["evento_id"], "ya")
+        lead.refresh_from_db()
+        self.assertIsNotNone(lead.despachado_en)
+        self.assertIsNone(lead.conflicto_en)
+        self.assertEqual(lead.conflicto_motivo, "")
+        self.assertEqual(lead.crm_contact_id, "c9")
+
+    def test_la_salida_reporta_los_tres_grupos(self):
+        _lead("56900000064", empresa="Pendiente Normal")
+        _lead("56900000065", empresa="Conflicto Vencido",
+              conflicto_en=timezone.now() - timedelta(hours=10),
+              conflicto_motivo="motivo", evento_id="ya1", payload_hash="x", revision=1)
+        _lead("56900000066", empresa="Conflicto Vigente",
+              conflicto_en=timezone.now() - timedelta(hours=1),
+              conflicto_motivo="motivo", evento_id="ya2", payload_hash="y", revision=1)
+        salida = StringIO()
+        with patch("bot.business.lead_intouch._enviar_al_sink",
+                   return_value={"resultado": "ok",
+                                 "cuerpo": {"status": "created", "contactId": "c1",
+                                           "dealId": None}}):
+            call_command("despachar_leads_pendientes",
+                        umbral_conflicto_horas=6, stdout=salida)
+        texto = salida.getvalue()
+        self.assertIn("Pendientes procesados: 1", texto)
+        self.assertIn("Conflictos vencidos reintentados: 1", texto)
+        self.assertIn(
+            "Conflictos sin vencer (esperando resolución manual en el CRM): 1.",
+            texto)

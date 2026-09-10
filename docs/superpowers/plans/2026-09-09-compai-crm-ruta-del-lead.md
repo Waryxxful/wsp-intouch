@@ -19,6 +19,7 @@
 - **Todo lo que un LLM va a leer se escribe en español correcto, con tildes** — docstrings, mensajes de error, `agentBrief` de campos. El modelo imita su corpus.
 - **Versión del CRM fijada en v1.15.3.** No se actualiza a upstream durante la integración.
 - **Nunca `prisma db push`, `migrate reset` ni `--accept-data-loss`** contra datos que no sean del entorno de test.
+- **Se usan los scripts del proyecto, no las herramientas a mano.** `bun run db:deploy`, `bun run db:test`, `bun run db:generate` — **nunca `bunx prisma ...`**: verificado en la máquina, `bunx` ignora la versión fijada del repo (`prisma ^7.9.1`) y baja la última, donde `migrate` se renombró a `migration`. Y los scripts del repo traen guardas propias que invocando prisma a mano se saltean: `require-local-db.ts` rechaza cualquier host que no sea local en `db:migrate`/`db:push`/`db:reset`/`db:seed`, y `db:test` se niega si la base no termina en `_test`. **Ese es el patrón general: si el proyecto ya tiene un script para algo, usarlo** — tres de los seis problemas de la Task 1 salieron de no hacerlo.
 - **`CRM_TELEMETRY_DISABLED=1`** en todos los entornos: por defecto el CRM manda un evento diario a un proyecto de terceros.
 - **No se despliega `apps/agent`** ni se habilitan Google/Microsoft/Slack, mailbox sync, enriquecimiento, Vercel Blob, AI Gateway ni tracking de sitios.
 - **Postgres no publica puerto.** `crm-app` y `crm-api` publican sólo en `127.0.0.1`.
@@ -99,16 +100,50 @@ COPY packages/telemetry/package.json packages/telemetry/
 COPY packages/validation/package.json packages/validation/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
+
+# VERIFICADO EN LA MÁQUINA: los postinstall del monorepo necesitan archivos
+# del repo, no sólo los manifests. `apps/api` corre
+# scripts/chmod-trpc-binary.mjs y `packages/db` corre `prisma generate`, que
+# necesita su schema. Sin estas dos copias, `bun install --frozen-lockfile`
+# falla con exit 1 y lo único que muestra Docker es "did not complete
+# successfully" -- el error real queda escondido.
+COPY apps/api/scripts/ apps/api/scripts/
+COPY packages/db/prisma/ packages/db/prisma/
+
 RUN bun install --frozen-lockfile
 
 COPY . .
 
-# El cliente Prisma se genera en el build: sin esto el arranque falla con
-# "@prisma/client did not initialize yet".
+# Se regenera con el fuente completo presente. El postinstall de packages/db
+# ya lo corrió arriba, pero ahí sólo estaba el schema.
 RUN bun run db:generate
 
 EXPOSE 3001
 CMD ["bun", "apps/api/src/main.ts"]
+```
+
+**Cómo se descubre un fallo de este tipo**, porque el mensaje de Docker no lo
+dice: el build reporta sólo `process "/bin/sh -c bun install" did not complete
+successfully`. Para ver el error real hay que forzar la salida sin buffer —
+`docker build --progress plain` y **sin** pipe a `tail`, que retiene todo hasta
+que el stream cierra. Y el atajo más rápido es reproducirlo fuera del build:
+
+```bash
+docker run --rm -v "$PWD:/src:ro" oven/bun:1.3.12-alpine sh -c '
+  cd /tmp && mkdir p && cd p && cp /src/package.json /src/bun.lock . && \
+  bun install --frozen-lockfile'
+```
+
+Y para saber qué archivos hacen falta antes del install, en vez de adivinar:
+
+```bash
+python3 -c "
+import json, glob
+for p in ['package.json'] + glob.glob('apps/*/package.json') + glob.glob('packages/*/package.json'):
+    d = json.load(open(p)).get('scripts', {})
+    for k in ('preinstall', 'install', 'postinstall', 'prepare'):
+        if k in d: print(p, k, d[k])
+"
 ```
 
 - [ ] **Step 4: Escribir `Dockerfile.app`**
@@ -128,6 +163,12 @@ COPY packages/telemetry/package.json packages/telemetry/
 COPY packages/validation/package.json packages/validation/
 COPY packages/typescript-config/package.json packages/typescript-config/
 COPY packages/ui/package.json packages/ui/
+
+# Igual que en Dockerfile.api: los postinstall necesitan estos dos
+# directorios o el install falla con exit 1.
+COPY apps/api/scripts/ apps/api/scripts/
+COPY packages/db/prisma/ packages/db/prisma/
+
 RUN bun install --frozen-lockfile
 
 COPY . .
@@ -175,7 +216,7 @@ services:
     # Sin `ports`: no se publica nada al host (prompt §E02).
     volumes:
       - crm-postgres:/var/lib/postgresql/data
-      - ./tools/init-db.sql:/docker-entrypoint-initdb.d/10-init-db.sql:ro
+      - ./tools/init-db.sh:/docker-entrypoint-initdb.d/10-init-db.sh:ro
     healthcheck:
       test: ["CMD-SHELL", "pg_isready -U $${POSTGRES_USER} -d $${POSTGRES_DB}"]
       interval: 3s
@@ -244,26 +285,48 @@ volumes:
 
 - [ ] **Step 6: Aislar la BD de pruebas por credenciales, no por nombre**
 
-`tools/init-db.sql`, que Postgres corre en la primera inicialización:
+Va como **`.sh` y no `.sql`**: los scripts de
+`docker-entrypoint-initdb.d` que son `.sql` se pasan a `psql` sin variables,
+así que un `:'app_password'` quedaría literal. Un `.sh` sí recibe el entorno.
 
-```sql
--- Tres roles con propósitos distintos. El aislamiento de las pruebas es de
--- PERMISOS y no de nombre: un runner mal configurado que apunte a la BD de la
--- app tiene que recibir "permission denied", no escribir.
-CREATE DATABASE crm_test;
+```bash
+#!/bin/bash
+# tools/init-db.sh -- corre UNA vez, en el primer arranque de Postgres.
+#
+# Tres roles con propósitos distintos, y el punto que importa: el aislamiento
+# de las pruebas es de PERMISOS y no de nombre. Un runner mal configurado que
+# apunte a la base de la app tiene que recibir "permission denied".
+set -euo pipefail
 
-CREATE ROLE crm_app  LOGIN PASSWORD :'app_password';
-CREATE ROLE crm_test LOGIN PASSWORD :'test_password';
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname "$POSTGRES_DB" <<SQL
+CREATE ROLE crm_app  LOGIN PASSWORD '${CRM_APP_PASSWORD}';
+CREATE ROLE crm_test LOGIN PASSWORD '${CRM_TEST_PASSWORD}';
 
--- La app manda en su BD y no puede ni conectarse a la de pruebas.
-GRANT ALL PRIVILEGES ON DATABASE crm TO crm_app;
+GRANT CONNECT ON DATABASE ${POSTGRES_DB} TO crm_app;
+GRANT USAGE, CREATE ON SCHEMA public TO crm_app;
+GRANT SELECT, INSERT, UPDATE, DELETE ON ALL TABLES IN SCHEMA public TO crm_app;
+GRANT USAGE, SELECT ON ALL SEQUENCES IN SCHEMA public TO crm_app;
+-- Las tablas que creen las migraciones (con crm_owner) quedan al alcance de
+-- crm_app sin re-otorgar despues de cada migracion.
+ALTER DEFAULT PRIVILEGES FOR ROLE ${POSTGRES_USER} IN SCHEMA public
+  GRANT SELECT, INSERT, UPDATE, DELETE ON TABLES TO crm_app;
+ALTER DEFAULT PRIVILEGES FOR ROLE ${POSTGRES_USER} IN SCHEMA public
+  GRANT USAGE, SELECT ON SEQUENCES TO crm_app;
+
+-- Y ESTA es la linea que convierte "ojala el runner este bien configurado" en
+-- una garantia: el rol de pruebas NO puede conectarse a la base de la app.
+REVOKE CONNECT ON DATABASE ${POSTGRES_DB} FROM crm_test;
+REVOKE ALL ON DATABASE ${POSTGRES_DB} FROM PUBLIC;
+SQL
+
+psql -v ON_ERROR_STOP=1 --username "$POSTGRES_USER" --dbname postgres <<SQL
+CREATE DATABASE crm_test OWNER crm_test;
 REVOKE CONNECT ON DATABASE crm_test FROM PUBLIC;
 GRANT CONNECT ON DATABASE crm_test TO crm_test;
-
--- Y el rol de pruebas NO puede conectarse a la BD de la app. Es la línea que
--- convierte "ojalá el runner esté bien configurado" en una garantía.
-REVOKE CONNECT ON DATABASE crm FROM crm_test;
+SQL
 ```
+
+Montarlo como `.sh` en el compose y darle `chmod +x`.
 
 Verificarlo, porque es la defensa que importa:
 
@@ -388,37 +451,43 @@ persona decide correr:
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose -f docker-compose.crm.yml run --rm \
-  -e DATABASE_URL="postgresql://crm_owner:$POSTGRES_PASSWORD@postgres:5432/crm?schema=public" \
-  tools bunx --bun prisma migrate deploy --schema packages/db/prisma/schema.prisma
+OWNER=$(grep -oP '(?<=^DATABASE_URL=).*' .env.release)
+docker compose -f docker-compose.crm.yml run --rm -e DATABASE_URL="$OWNER" \
+  tools bun run db:deploy
 ```
 
-`migrate deploy` y **nunca** `db push`, `migrate reset` ni
-`--accept-data-loss`. Va con el rol `crm_owner` porque `crm_app` no tiene por
-qué poder cambiar el esquema en caliente.
+`db:deploy` del propio repo, que por dentro es `prisma migrate deploy` con la
+versión fijada. **Nunca `bunx prisma`** (ver Global Constraints), ni `db push`,
+`migrate reset` o `--accept-data-loss`. Va con el rol `crm_owner` porque
+`crm_app` no puede cambiar el esquema en caliente — comprobado: le responde
+`must be owner of table`.
+
+Expected: `All migrations have been successfully applied.` y 61 tablas en
+`public`.
 
 - [ ] **Step 12: Comprobar el esquema real, no sólo el historial**
 
 ```bash
-docker compose -f docker-compose.crm.yml run --rm tools \
-  bunx --bun prisma migrate status --schema packages/db/prisma/schema.prisma
+OWNER=$(grep -oP '(?<=^DATABASE_URL=).*' .env.release)
+docker compose -f docker-compose.crm.yml run --rm -e DATABASE_URL="$OWNER" \
+  tools sh -c 'cd packages/db && ./node_modules/.bin/prisma migrate status'
 ```
 
 Expected: `Database schema is up to date!`.
 
-**Pero `migrate status` compara historiales de migración, no certifica que el
-esquema físico coincida.** Para eso, un diff real contra el esquema declarado:
+Va por `./node_modules/.bin/prisma` y no por `bunx`, para usar la versión que
+el repo fijó. **Y `migrate status` compara historiales de migración, no
+certifica que el esquema físico coincida**; para deriva real, contar las tablas
+y compararlas con lo que el schema declara:
 
 ```bash
-docker compose -f docker-compose.crm.yml run --rm tools \
-  bunx --bun prisma migrate diff \
-    --from-schema-datasource packages/db/prisma/schema.prisma \
-    --to-schema-datamodel packages/db/prisma/schema.prisma \
-    --exit-code
+docker compose -f docker-compose.crm.yml exec -T postgres \
+  psql "$(echo $OWNER | sed 's|@postgres:|@127.0.0.1:|; s|?schema=public||')" \
+  -tAc "select count(*) from information_schema.tables where table_schema='public'"
 ```
 
-Expected: exit code `0` y ninguna diferencia. Un exit `2` significa deriva y
-hay que resolverla antes de seguir.
+Nota sobre `psql`: el `?schema=public` del final es un parámetro de Prisma, no
+de `psql` — dejarlo da `invalid URI query parameter: "schema"`.
 
 - [ ] **Step 13: Verificar que la imagen ejecuta el build y no el fuente**
 
@@ -442,7 +511,7 @@ y volver a verificar.
 ```bash
 cd /home/admincrm/compai-crm
 git add Dockerfile.api Dockerfile.app Dockerfile.tools .dockerignore \
-        docker-compose.crm.yml tools/init-db.sql RUNBOOK.md
+        docker-compose.crm.yml tools/init-db.sh RUNBOOK.md
 git commit -m "infra: build y compose autonomo para desplegar el CRM en GranCRM-QA
 
 Upstream no trae Dockerfile y su compose solo levanta Postgres, publicandolo
@@ -575,6 +644,43 @@ curl -s -o /dev/null -w 'sin key: %{http_code}\n' http://127.0.0.1:3006/api/user
 Expected: `con key: 200` y `sin key: 401`. Si la primera da 401, la key no está autenticando y las Tasks 9 y 14 no se pueden validar.
 
 - [ ] **Step 4: Medir el alcance REAL de la key — decide el diseño**
+
+> **MEDIDO EL 2026-09-10, Y SALIÓ MAL. El resultado ya está aplicado abajo.**
+>
+> Con la key del usuario de servicio, contra la instalación real:
+>
+> | Ruta | Resultado |
+> |---|---|
+> | `POST /rest/contacts/search` | **200** — lee contactos |
+> | `POST /rest/companies/search` | **200** — lee empresas |
+> | `POST /rest/deals/search` | **200** — lee oportunidades |
+> | `POST /rest/contacts` | **200** — **crea** un contacto |
+> | las mismas sin la key | 401 |
+>
+> Las keys se crean sin `permissions` y `enableSessionForAPIKeys: true` las
+> vuelve equivalentes a su usuario dueño: chequear el id en un endpoint **no
+> limita las otras rutas**. La key emitida se **revocó** y el contacto de
+> prueba se borró.
+>
+> **Se toma la segunda vía**: un secreto dedicado
+> (`INTOUCH_INGEST_SECRET`), verificado por un guard que corre SÓLO en
+> `/api/ingest`, con comparación de tiempo constante. El alcance queda exacto
+> en las dos direcciones — una API key de Better Auth no abre la ingesta, y
+> este secreto no abre nada más. La ruta va con `@AllowAnonymous()` para que
+> el guard de Better Auth no la gatee, y autentica el guard propio.
+>
+> **Decisión más amplia que queda para el usuario**, destapada por la
+> medición: `enableSessionForAPIKeys` afecta a TODAS las keys del CRM, no sólo
+> a la del bot. Cualquier key que un usuario cree en Settings abre la API
+> completa con su identidad. Apagarlo endurecería la instalación entera pero
+> cambia el comportamiento de una función que upstream ofrece. No se toca sin
+> decisión explícita.
+>
+> Nota de ejecución: los scripts que importan `@crm/*` tienen que vivir DENTRO
+> de `apps/api/` — bun enlaza los workspaces por paquete
+> (`apps/api/node_modules/@crm/`) y no en la raíz, y la resolución va por la
+> ubicación del archivo, no por el `cwd`. Y las rutas reales del bridge REST
+> salen del propio `GET /openapi.json`, con prefijo `/rest`.
 
 Éste es el paso que define si la credencial sirve. Se prueba contra las rutas
 que el bot **no** tiene por qué poder usar:
@@ -773,9 +879,17 @@ model LeadIngestEvent {
 
 ```bash
 cd /home/admincrm/compai-crm
-docker compose exec api bunx --bun prisma migrate dev \
-  --schema packages/db/prisma/schema.prisma \
-  --name add_lead_ingest_event
+OWNER_TEST=$(grep -oP '(?<=^TEST_DATABASE_URL=).*' .env.tools)
+# La migración se CREA contra la base de pruebas, que es desechable, y se
+# revisa antes de aplicarla a la real (Global Constraints).
+#
+# ALLOW_REMOTE_DB=1 hace falta porque `require-local-db.ts` sólo acepta
+# localhost/127.0.0.1/::1/0.0.0.0, y acá el host es `postgres` -- el nombre de
+# servicio de un contenedor en esta misma máquina, no una base remota. El
+# script igual imprime su advertencia, y el destino es la base _test.
+docker compose -f docker-compose.crm.yml run --rm \
+  -e DATABASE_URL="$OWNER_TEST" -e ALLOW_REMOTE_DB=1 \
+  tools bun run --filter=@crm/db db:migrate -- --name add_lead_ingest_event
 ```
 
 Revisar el SQL generado antes de seguir: debe ser sólo `CREATE TABLE` + índices, **sin ningún `ALTER`/`DROP` sobre tablas existentes**.
@@ -3529,6 +3643,23 @@ en vez de inventar un dueno."
 
 ### Task 10: El emisor aprende `evento_id` y `revision`
 
+> **HECHA POR OTRA SESIÓN (`admincrm-3a`).** Código commiteado en `e034eab`
+> de `master`, con la suite en 1861 tests y 0 fallas — el total subió
+> exactamente en los 9 de `EventoTest`, así que nada quedó escondido detrás de
+> un `ImportError`. La migración `0038` está **generada y revisada pero NO
+> aplicada**: son 48 tablas reales en `intouch` de `QAIntouch` y aplicarla es
+> tocar producción, así que espera el OK del usuario.
+>
+> **Consecuencia práctica**: mientras la `0038` no esté aplicada, el emisor no
+> puede despachar contra la base real — los tres campos no existen como
+> columnas. Las pruebas de contrato del receptor funcionan igual.
+>
+> **Y el contexto cambió: `wsp_intouch` ya migró contra la base real.** El
+> schema `intouch` de `QAIntouch` tiene **48 tablas** — hasta hace unas horas
+> esto corría sólo en SQLite. Así que la `0038` dejó de ser un archivo y pasó a
+> ser **un cambio en producción**, con la confirmación explícita del usuario
+> que eso exige. Lo mismo vale para la `0039` de la Task 11.
+
 **Files:**
 - Modify: `/home/admincrm/wsp_intouch/bot/models.py` (clase `LeadInTouch`)
 - Create: `/home/admincrm/wsp_intouch/bot/migrations/0038_lead_intouch_evento.py` (la genera `makemigrations`)
@@ -3843,6 +3974,14 @@ Co-Authored-By: Claude Opus 5 (1M context) <noreply@anthropic.com>"
 ---
 
 ### Task 11: El emisor valida la respuesta
+
+> **REPARTO POR REPOSITORIO, acordado entre sesiones el 2026-09-10.** Las
+> Tasks 10 a 13 tocan `wsp_intouch` y las lleva `admincrm-3a`; las del CRM
+> (2, 9, 15) y el cierre E2E (14) los lleva `admincrm-9a`. El motivo no es
+> reparto de trabajo sino evitar dos sesiones editando
+> `bot/business/lead_intouch.py` — el conflicto de working tree compartido que
+> este repo tiene por regla evitar. Task 11 en particular toca la MISMA
+> función que la 10.
 
 **Files:**
 - Modify: `/home/admincrm/wsp_intouch/bot/business/lead_intouch.py` (`_enviar_al_sink`, `_despachar_si_corresponde`)
@@ -4817,9 +4956,23 @@ LEAD_SINK_URL=http://crm-api:3001/api/ingest/intouch-lead
 LEAD_SINK_TOKEN=<la key de la Task 2>
 ```
 
-- [ ] **Step 4: Aplicar las migraciones del bot — CON CONFIRMACIÓN EXPLÍCITA**
+- [ ] **Step 4: Aplicar las migraciones del bot — LO HACE LA OTRA SESIÓN**
 
-**Parar acá y pedirle al usuario la confirmación de la migración contra la BD real** (Global Constraints). Recién con el sí:
+Las migraciones `0038` y `0039` salen de las Tasks 10 y 11, que **tomó
+`admincrm-3a`**. No se aplican desde acá: doble aplicación contra una base con
+48 tablas reales es exactamente el daño que la regla evita.
+
+Antes de seguir con el resto de esta tarea, confirmar con esa sesión que el
+código está commiteado **y** que la migración está aplicada — son dos momentos
+distintos y ella los avisa por separado. Verificar:
+
+```bash
+cd /home/admincrm/wsp_intouch
+docker compose exec web python manage.py showmigrations bot | tail -5
+```
+
+Expected: `0038` y `0039` con `[X]`. Si están sin aplicar, **parar** — el
+emisor no va a poder mandar `evento_id` y el receptor responderá 400.
 
 ```bash
 cd /home/admincrm/wsp_intouch

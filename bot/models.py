@@ -1043,6 +1043,28 @@ class LeadInTouch(models.Model):
         help_text="Cuándo se despachó al destino externo. Nulo con LEAD_SINK=none, "
                   "y nulo tras un fallo: un lead sin despachar tiene que ser visible.")
 
+    # Idempotencia del despacho (spec de la integración con el CRM §4). Son
+    # TRES cosas distintas y por eso son tres campos:
+    #
+    # - La clave de contacto se deriva del wa_id y no se guarda: es estable por
+    #   definición y se recalcula (ver `clave_contacto`).
+    # - `evento_id` identifica el INTENTO. Se regenera SÓLO cuando cambia el
+    #   contenido, así que todos los reintentos de un mismo envío lo comparten
+    #   y el receptor los reconoce como el mismo hecho.
+    # - `revision` da el orden. El receptor rechaza una revisión que no avanza,
+    #   para que un envío que llegó tarde no pise a uno más nuevo.
+    evento_id = models.CharField(
+        max_length=36, blank=True, default="",
+        help_text="El intento de despacho vigente. Se regenera cuando cambia "
+                  "el contenido, nunca en un reintento.")
+    payload_hash = models.CharField(
+        max_length=64, blank=True, default="",
+        help_text="Hash del contenido de negocio del último evento abierto. "
+                  "Es cómo se decide si un cambio amerita un evento nuevo.")
+    revision = models.PositiveIntegerField(
+        default=0,
+        help_text="Orden de los eventos de este lead. Sólo avanza.")
+
     class Meta:
         ordering = ["-actualizado"]
 

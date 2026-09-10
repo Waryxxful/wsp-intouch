@@ -269,14 +269,14 @@ def registrar_lead_del_turno(wa_id: str, lead) -> None:
         logger.error("[lead] no pude registrar el lead de %s", wa_id, exc_info=True)
 
 
-def clave_idempotencia(lead) -> str:
-    """Clave estable por conversación, para que el receptor pueda deduplicar.
+def clave_contacto(lead) -> str:
+    """La identidad comercial del contacto, estable para siempre.
 
-    Es el punto 5 de la sección "Ajustes necesarios" del prompt de origen: la
-    instrucción al modelo no alcanza frente a reentregas de WhatsApp ni a
-    fallos de red. La clave es estable porque hay UN lead por conversación
-    (OneToOne), así que dos despachos del mismo lead llevan la misma clave y el
-    receptor sabe que son el mismo hecho.
+    Se llamaba `clave_idempotencia`, y el nombre mentía: `Conversation.wa_id`
+    es `unique=True`, así que hay UNA conversación por número y esta clave
+    identifica al CONTACTO, no a una conversación. La misma persona que vuelve
+    a escribir meses después reusa la misma fila y la misma clave -- que es
+    justo lo que el CRM necesita para no abrir un registro nuevo.
 
     Va hasheada: viaja a otro sistema y no tiene por qué llevar el teléfono en
     claro cuando un hash cumple la misma función.
@@ -285,6 +285,55 @@ def clave_idempotencia(lead) -> str:
 
     crudo = f"wsp_intouch:{lead.conversation.wa_id}"
     return hashlib.sha256(crudo.encode("utf-8")).hexdigest()[:32]
+
+
+# Alias del nombre viejo, para no romper llamadas que queden en el repo.
+clave_idempotencia = clave_contacto
+
+
+# Los campos del payload que son TRANSPORTE y no contenido. Si entraran al
+# hash, cada reintento parecería contenido nuevo y el despacho no sería
+# idempotente nunca.
+_CAMPOS_DE_TRANSPORTE = frozenset({"evento_id", "revision"})
+
+
+def hash_de_negocio(payload: dict) -> str:
+    """Hash del contenido comercial de un payload, ignorando el transporte.
+
+    Ordenado y serializado de forma estable: dos payloads con las mismas claves
+    en otro orden tienen que dar el mismo hash, o cada turno abriría un evento
+    nuevo sin que nada hubiera cambiado.
+    """
+    import hashlib
+    import json
+
+    negocio = {k: v for k, v in payload.items() if k not in _CAMPOS_DE_TRANSPORTE}
+    serializado = json.dumps(negocio, sort_keys=True, ensure_ascii=False,
+                             default=str)
+    return hashlib.sha256(serializado.encode("utf-8")).hexdigest()
+
+
+def marcar_evento(lead) -> bool:
+    """Abre un evento nuevo si el contenido del lead cambió. True si lo abrió.
+
+    Es lo que separa "reintento del mismo envío" de "nueva actualización
+    comercial", que es la distinción que el receptor no puede hacer solo.
+    """
+    import uuid
+
+    payload = payload_del_lead(lead)
+    hash_actual = hash_de_negocio(payload)
+    if lead.evento_id and lead.payload_hash == hash_actual:
+        return False
+
+    lead.evento_id = str(uuid.uuid4())
+    lead.payload_hash = hash_actual
+    lead.revision = (lead.revision or 0) + 1
+    # `despachado_en` se limpia: hay contenido nuevo que todavía no llegó al
+    # destino, y dejarlo sellado escondería el lead de los pendientes.
+    lead.despachado_en = None
+    lead.save(update_fields=["evento_id", "payload_hash", "revision", "despachado_en"])
+    return True
 
 
 # Los campos del contrato que viajan al destino externo. Explícito y no
@@ -308,7 +357,9 @@ def payload_del_lead(lead) -> dict:
     # necesita a quién llamar.
     payload["telefono"] = lead.conversation.wa_id
     payload["origen"] = "wsp_intouch"
-    payload["clave_idempotencia"] = clave_idempotencia(lead)
+    payload["clave_contacto"] = clave_contacto(lead)
+    payload["evento_id"] = lead.evento_id
+    payload["revision"] = lead.revision
     return payload
 
 

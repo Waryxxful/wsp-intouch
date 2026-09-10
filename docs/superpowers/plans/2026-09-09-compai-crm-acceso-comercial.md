@@ -62,7 +62,24 @@ Sin `secret`, `remote_entry_url` ni `remote_scope`: no aplican al modo `iframe`.
 
 - [ ] **Step 2: Registrarlo y anotar el id**
 
-El registro lo hace un SA desde el panel, o el endpoint interno del orquestador. **Pedirle al usuario que confirme el alta** — es un cambio de acceso, y esta guía no lo autoriza por sí sola.
+> **CORREGIDO el 2026-09-10.** Este paso estaba mal descrito. La app **no** la
+> da de alta un SA desde el panel: **se auto-registra en cada arranque** con
+> `POST /internal/register-app/` (idempotente), leyendo `DIOS_CONFIG_PATH`.
+> Ver `docs-repo/integracion-satelite.md` §Paso 1, que es la referencia.
+>
+> Tres cosas más que este plan no decía y cuestan una tarde:
+> - **`"secret": ""` da 401** en QA: `DIOS_REGISTER_SECRET` está configurado y
+>   `_secret_check` es fail-fast. El valor real va en el `dios.json` local,
+>   que **no se versiona**; la plantilla va sin secreto.
+> - **El endpoint no devuelve el `id`**, así que `CRM_APLICACION_ID` hay que
+>   consultarlo aparte después de registrar.
+> - **La identidad es el `nombre`**, no el `slug`: renombrar la app crea una
+>   fila nueva en vez de actualizar la existente.
+>
+> Implementado para el CRM en `compai-crm/apps/api/src/dios/` (11 tests), y
+> **apagado** mientras `DIOS_CONFIG_PATH` no esté en el `.env`.
+
+**Pedirle al usuario que confirme el alta** — es un cambio de acceso, y esta guía no lo autoriza por sí sola.
 
 ```bash
 cd /home/admincrm/orquestador

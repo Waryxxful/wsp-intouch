@@ -7,45 +7,66 @@ de memoria). Cada afirmación dice cómo se comprobó.
 
 ## 0. Lo urgente: el orden del apagado de Cavem
 
-**Hoy los dos bots están arriba y los dos responden el webhook.** Verificado:
+**Meta sigue apuntando a `/cavem/webhook`.** Verificado el 2026-09-10 **contra
+la API de Meta**, no supuesto:
 
 ```
-POST /cavem/webhook   -> 403   (llega a Django, rechaza la firma)
-POST /intouch/webhook -> 403   (idem)
+GET /v21.0/2267950390607058/subscriptions
+  callback_url: "https://qadash.in-touchcrm.cl/cavem/webhook"
+  active: true
 ```
 
-Un `403` ahí es la respuesta correcta a una petición sin firma válida: significa
-que la ruta llega al bot. Si alguno diera `502`, no habría nadie detrás.
-
-**El orden importa y hoy está al revés de lo que hace falta.** Meta sigue
-apuntando a `/cavem/webhook`, así que:
+**El orden importa y hoy sigue al revés de lo que hace falta:**
 
 - **Apagar Cavem AHORA = perder los mensajes.** Meta seguiría entregando a una
   ruta cuyo backend no existe (`502`), y WhatsApp no reintenta indefinidamente.
 - El orden correcto es: **(1)** repuntar Meta, **(2)** verificar que entra por
   InTouch, **(3)** recién entonces apagar Cavem.
 
-**Dato que baja el riesgo:** en las últimas 24 h hubo **cero tráfico real** de
-Meta. Los 3 POST que registra Cavem son todos `curl/7.81.0` — pruebas de esta
-sesión. O sea que hoy nadie le está escribiendo al número, y la ventana entre
-(1) y (3) es de bajo impacto. Pero eso no prueba que Meta no apunte ahí; sólo
-que no llegó nada.
+**Dato que baja el riesgo:** al 2026-09-10 no hay tráfico real de Meta a ese
+número; los POST registrados son todos `curl` de las pruebas. La ventana entre
+(1) y (3) es de bajo impacto hoy, y crece cuando el número empiece a usarse.
 
-### 0.1 Repuntar el webhook en Meta — **del usuario**
+### 0.1 Repuntar el webhook — **NO hace falta el panel de Meta**
+
+Esto estaba mal en las versiones anteriores de este documento y **costó horas de
+bloqueo innecesario**: se daba por hecho que había que entrar a la consola web de
+Meta. No es así. El `WHATSAPP_TOKEN` del `.env.docker` es de un **usuario de
+sistema** de la App `bots-intouch`, con `whatsapp_business_management` y sin
+vencimiento. Verificado con `debug_token`:
 
 ```
-https://qadash.in-touchcrm.cl/intouch/webhook
+app_id: 2267950390607058 · application: bots-intouch · type: SYSTEM_USER
+scopes: whatsapp_business_management, whatsapp_business_messaging, ...
 ```
 
-**Sin `/wsp/`.** Los runbooks de los dos bots decían
-`https://<host>/wsp/<slug>/webhook`, y **esa ruta está mal**: cae en el
-catch-all de la SPA y devuelve HTML, no Django. Verificado: antes de agregar el
-bloque de nginx, `POST /intouch/webhook` daba **405**; ahora da 403.
+O sea que el repunte se hace por la Graph API, desde este host:
 
-El handshake de verificación ya funciona por nginx (probado):
+```bash
+cd /home/admincrm/wsp_intouch
+APPID=2267950390607058
+AS=$(grep '^WHATSAPP_APP_SECRET=' .env.docker | cut -d= -f2-)
+VT=$(grep '^WHATSAPP_VERIFY_TOKEN=' .env.docker | cut -d= -f2-)
+curl -s -X POST "https://graph.facebook.com/v21.0/$APPID/subscriptions" \
+  -d "object=whatsapp_business_account" \
+  -d "callback_url=https://qadash.in-touchcrm.cl/intouch/webhook" \
+  -d "verify_token=$VT" \
+  -d "fields=account_alerts,account_review_update,account_update,calls,message_template_quality_update,message_template_status_update,messages,phone_number_name_update,phone_number_quality_update,security,message_template_components_update" \
+  -d "access_token=$APPID|$AS"
+```
 
-- con el `WHATSAPP_VERIFY_TOKEN` correcto → devuelve el `hub.challenge`
-- con un token incorrecto → `403`
+Tiene que devolver `{"success":true}`. **Pasar `fields` completo**: el POST
+reemplaza la suscripción, así que omitirlo desuscribe campos que hoy están
+activos. La lista de arriba es la que estaba vigente el 2026-09-10.
+
+**Es reversible:** el mismo comando con `/cavem/webhook` lo devuelve.
+
+**Sin `/wsp/`** en la URL: esa ruta cae en el catch-all de la SPA y devuelve
+HTML, no Django.
+
+El handshake ya está probado por el camino nuevo (nginx → dispatcher `:6030`):
+con el `WHATSAPP_VERIFY_TOKEN` correcto devuelve el `hub.challenge`, con uno
+incorrecto `403`.
 
 ### 0.2 Verificar que entra por InTouch
 
@@ -98,37 +119,30 @@ y sus volúmenes de media quedan donde están. Verificado hoy: `SCHEMA_NAME()=ca
 
 ## 1. Bloqueado en credenciales o accesos — **del usuario**
 
-### 1.1 El DDL del RAG en Supabase — **es la única falla del `doctor`**
+### 1.1 y 1.2 El RAG — **RESUELTO el 2026-09-10**
 
-```
-✗ match_documentos no responde en el schema 'intouch'
-    Error PGRST106: Invalid schema: intouch
-```
+Estaba anotado como bloqueado porque se suponía que a Supabase sólo se llegaba
+por su editor web. **Era falso:** hay un MCP de Supabase conectado al proyecto
+`intouch` (ref `wrnbvrhwcwabmzfrhgig`, el mismo del `SUPABASE_URL`), así que el
+DDL se aplicó por ahí.
 
-El DDL está emitido y listo en `docs/rag_schema_intouch.sql`. Hay que pegarlo en
-el SQL editor de Supabase (es web, no hay acceso por CLI desde el host) y
-**además** agregar `intouch` en *Settings → API → Exposed schemas* — eso no es
-SQL y se olvida siempre; sin eso todo falla con `PGRST106` aunque la tabla exista.
+Lo que sí requirió al usuario fue el dropdown de *Settings → API → Exposed
+schemas*: se verificó que no hay vía SQL (el rol `authenticator` de este
+proyecto no tiene `pgrst.db_schemas`; Supabase lo administra fuera de la base).
 
-**Consecuencia mientras no esté:** el bot conversa, califica y usa su catálogo de
-soluciones, pero **no puede responder preguntas de fondo** (cómo funciona una
-solución, políticas, tratamiento de datos). El especialista va a decir
-honestamente que no tiene el dato, que es el comportamiento diseñado — pero es
-media funcionalidad menos.
+Estado verificado:
 
-### 1.2 Indexar el conocimiento, después del DDL
+| | |
+|---|---|
+| Schema `intouch` | idéntico a `renault` en columnas (9/9), índices (hnsw + gin + pkey), RLS, grants y firma de `match_documentos` |
+| Vecinos | intactos — renault 323 filas, astara 1852, cavem 46 |
+| Indexado | **7/7 documentos, 51 chunks, todos con embedding** |
+| `doctor --seccion rag` | **3 ok · 0 fallas** |
 
-```bash
-cd /home/admincrm/wsp_intouch
-docker compose exec web python manage.py cargar_conocimiento_rag
-docker compose exec web python manage.py reindexar_conocimiento_rag --cliente intouch
-docker compose exec web python manage.py doctor --seccion rag   # verificar que indexó CHUNKS
-```
-
-**Verificar que indexó chunks, no que el comando terminó sin error.** El
-reindexado indexa `ScrapedPage`, no archivos: en el bot hermano el comando corría,
-imprimía "0 páginas reindexadas" y el RAG quedaba vacío. Es el modo de falla más
-caro de esta parte, porque el bot arranca perfecto y contesta cualquier cosa.
+**Trampa real que costó un diagnóstico:** `reindexar_conocimiento_rag` salió con
+**exit code 0 habiendo fallado 1 de 7 páginas** (`analitica-y-calidad.md`, por
+un JSON inválido puntual del LLM en `_hechos_de_documento`). El exit code miente:
+hay que contar los chunks. Se reindexó esa página sola y quedó completa.
 
 ### 1.3 Los siete `.md` del conocimiento esperan revisión humana
 
@@ -167,12 +181,7 @@ sobre las API keys del CRM sigue abierta y es del usuario.
 
 ## 2. Deuda técnica conocida — no bloquea nada
 
-### 2.1 El destino externo del lead está apagado (`LEAD_SINK=none`)
-
-El circuito emisor → receptor **está probado de punta a punta** contra el CRM
-real, en sus dos ramas (creación y replay). Pero en el `.env.docker` el sink
-sigue en `none` a propósito: encenderlo es una decisión de operación, no de
-código. Para encenderlo:
+### 2.1 El destino externo del lead — **ENCENDIDO el 2026-09-10**
 
 ```
 LEAD_SINK=http
@@ -180,9 +189,29 @@ LEAD_SINK_URL=http://crm-api:3001/api/ingest/intouch-lead
 LEAD_SINK_TOKEN=<el de /home/admincrm/.ingest_secret_for_bot>
 ```
 
-Y hay que engancharle al servicio `web` la red `crm_ingest` en el
-`docker-compose.yml` — hoy no está declarada, y el E2E se corrió con
-`docker run --network crm_ingest` justamente para no tocar el compose.
+La red `crm_ingest` ya está declarada en el `docker-compose.yml` (commit
+`7e4dfc6`). Tres cosas de ese cambio que no son obvias:
+
+1. **`cron` también va en la red, no sólo `web`.** Ese sidecar corre
+   `despachar_leads_pendientes`, o sea el REINTENTO de los leads que fallaron en
+   caliente. Sin la red, el camino que existe para recuperarse de un fallo sería
+   el único que nunca funciona, en silencio y cada 15 minutos. Este documento y
+   la sesión del CRM decían los dos "el servicio `web`".
+2. **`default` se declara explícita.** Declarar `networks` en un servicio
+   reemplaza la red default implícita; omitirla deja a `web` sin hablar con `cron`.
+3. **Puerto 3001, el interno.** El 3006 está publicado en loopback del host y no
+   se resuelve desde un contenedor. Y **no va por el gateway**: `/crm/api/ingest`
+   está en 404 a propósito.
+
+Verificado sin escribir nada en el CRM: desde dentro del contenedor, `crm-api`
+resuelve a `172.30.0.2` y un POST **sin credencial** devuelve `401 "Falta la
+credencial de ingesta"` — prueba positiva de que el bot llega Y de que el guard
+corre. La huella `sha256` del secreto coincide con la del CRM.
+
+**Sin hacer todavía:** el E2E con un lead real (disparar uno por el bot, que la
+sesión del CRM confirme `contactId`/`dealId`, y limpiar por ids, nunca por
+prefijo). Ojo con el contrato: `clave_contacto` son 32 caracteres **HEX** y
+`evento_id` un UUID válido.
 
 ### 2.2 El frontend usa rutas absolutas en vez del `apiBase` del contract
 

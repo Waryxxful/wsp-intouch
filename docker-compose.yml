@@ -100,6 +100,14 @@ services:
   # contenedores nuevos. Levantar este sidecar es parte del despliegue, no
   # de este cambio.
   cron:
+    # El HEALTHCHECK del Dockerfile hace `curl /healthz` al 8000, que sirve para
+    # `web` (gunicorn) pero NO para este sidecar: acá no escucha nada, así que el
+    # contenedor quedaba `unhealthy` para siempre aunque el barrido corriera bien.
+    # Un contenedor permanentemente en rojo entrena a ignorar el estado de salud,
+    # que es el mismo problema que tener un chequeo del doctor que grita en falso.
+    # `wsp_pompeyo` no lo sufre porque su Dockerfile no declara HEALTHCHECK.
+    healthcheck:
+      disable: true
     build: .
     env_file:
       - .env.docker

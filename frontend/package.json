@@ -6,7 +6,8 @@
   "scripts": {
     "dev": "vite",
     "build": "tsc -b && vite build",
-    "preview": "vite preview"
+    "preview": "vite preview",
+    "test": "node --test 'tests/*.test.ts'"
   },
   "dependencies": {
     "@duralux/ui": "github:Waryxxful/duralux-ui#89b16810c79f89802c98186059c913c4bd21739a",

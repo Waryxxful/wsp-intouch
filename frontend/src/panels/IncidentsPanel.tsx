@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Modal, Badge, Button, LoadingState, EmptyState } from '@duralux/ui';
 import { apiFetch } from '../api';
+import { whenCurrent } from '../chat/chatState';
 
 interface Incident {
   id: number;
@@ -31,15 +32,24 @@ export function IncidentsPanel({ conversationId, open, onClose, onChanged }: {
   const [loading, setLoading] = useState(false);
   const [updatingId, setUpdatingId] = useState<number | null>(null);
 
-  const load = () => {
+  // Atado a la conversación del render: si el operador cambia de chat con la
+  // carga en vuelo, el efecto la aborta y los incidentes de la conversación
+  // anterior no aparecen en el panel de la nueva.
+  const load = (signal: AbortSignal) => {
     setLoading(true);
-    apiFetch<{ items: Incident[] }>(`/intouch/api/conversations/${conversationId}/incidents`)
-      .then(data => setItems(data.items))
-      .finally(() => setLoading(false));
+    return whenCurrent(
+      signal,
+      apiFetch<{ items: Incident[] }>(`/intouch/api/conversations/${conversationId}/incidents`, { signal }),
+      data => setItems(data.items),
+    ).then(() => { if (!signal.aborted) setLoading(false); });
   };
 
   useEffect(() => {
-    if (open) load();
+    if (!open) return;
+    const scope = new AbortController();
+    setItems([]);
+    load(scope.signal);
+    return () => scope.abort();
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, conversationId]);
 

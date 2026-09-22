@@ -1,8 +1,12 @@
 import { useEffect, useLayoutEffect, useRef, useState } from 'react';
-import { useLocation, useNavigate, useParams } from 'react-router-dom';
+import { useLocation, useNavigate, useParams, useSearchParams } from 'react-router-dom';
 import { ChatBubble, ChatInputBar, ChatSidebar, Avatar, Button, Badge, Alert, PageHeader } from '@duralux/ui';
 import { apiFetch } from '../api';
 import { IncidentsPanel } from '../panels/IncidentsPanel';
+import {
+  clampMaxRange, conversationTarget, parseChatFilters, parseConversationId,
+  whenCurrent, writeChatFilters, type ChatFilters,
+} from '../chat/chatState';
 
 interface Conversation {
   id: number;
@@ -53,53 +57,21 @@ function formatMessageTime(iso: string): string {
   return `${day}/${month} ${hour}:${min}`;
 }
 
-// Default lunes-domingo de la semana actual (zona local).
-function getWeekBounds(): { monday: string; sunday: string } {
-  const today = new Date();
-  const dow = today.getDay(); // 0=Dom, 1=Lun, ..., 6=Sab
-  const mondayOffset = dow === 0 ? -6 : 1 - dow;
-  const monday = new Date(today);
-  monday.setDate(today.getDate() + mondayOffset);
-  const sunday = new Date(monday);
-  sunday.setDate(monday.getDate() + 6);
-  const iso = (d: Date) => {
-    const y = d.getFullYear();
-    const m = String(d.getMonth() + 1).padStart(2, '0');
-    const day = String(d.getDate()).padStart(2, '0');
-    return `${y}-${m}-${day}`;
-  };
-  return { monday: iso(monday), sunday: iso(sunday) };
-}
-
-// Cap max 62 dias entre `desde` y `hasta`. Si el rango excede, devuelve el
-// hasta ajustado al maximo permitido.
-function clampMaxRange(desde: string, hasta: string, maxDays = 62): string {
-  if (!desde || !hasta) return hasta;
-  const d = new Date(desde + 'T00:00:00');
-  const h = new Date(hasta + 'T00:00:00');
-  const diffDays = (h.getTime() - d.getTime()) / (1000 * 60 * 60 * 24);
-  if (diffDays <= maxDays) return hasta;
-  const capped = new Date(d);
-  capped.setDate(capped.getDate() + maxDays);
-  const y = capped.getFullYear();
-  const m = String(capped.getMonth() + 1).padStart(2, '0');
-  const day = String(capped.getDate()).padStart(2, '0');
-  return `${y}-${m}-${day}`;
-}
-
 export function ChatOperatorPage({ basename }: { basename: string }) {
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
-  // Path absoluto, no relativo: navigate('../chat/:id') resuelve distinto
-  // segun si ya estabas en ".../chat" o ".../chat/:id" (ej. "chat/chat/123"),
-  // lo que no matchea ninguna ruta y tira al operador afuera del panel.
+  // La URL es la única fuente de verdad de qué conversación está abierta: el
+  // id se deriva del parámetro en cada render, sin copiarlo a un estado que
+  // quede un render atrasado respecto de la URL.
+  const activeId = parseConversationId(conversationId);
+  // Destino absoluto calculado en chatState. Un clic sobre el chat que ya está
+  // abierto no navega: apilaría una entrada duplicada en el historial.
   const goToConversation = (id: number) => {
-    const base = location.pathname.replace(/\/chat(\/[^/]*)?\/?$/, '');
-    navigate(`${base}/chat/${id}`);
+    const target = conversationTarget(location, activeId, id);
+    if (target) navigate(target);
   };
   const [convs, setConvs] = useState<Conversation[]>([]);
-  const [activeId, setActiveId] = useState<number | null>(conversationId ? Number(conversationId) : null);
   // Fallback cuando la conv activa no esta en `convs` (el filtro estado la
   // dejo afuera, ej. el operador cambia a "Cerradas" con un chat abierto en
   // "Abiertas") — se llena con un fetch puntual al detalle por id.
@@ -110,14 +82,19 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   const [togglingMode, setTogglingMode] = useState(false);
   const [archiving, setArchiving] = useState(false);
   const [showIncidents, setShowIncidents] = useState(false);
-  const [estado, setEstado] = useState<'abiertas' | 'cerradas' | 'todas'>('abiertas');
   const [count, setCount] = useState(0);
   const [search, setSearch] = useState('');
-  // Filtro por rango de fechas (updated_at). Default = lunes-domingo de la
-  // semana actual. Max 62 dias entre desde y hasta.
-  const weekBounds = getWeekBounds();
-  const [dateDesde, setDateDesde] = useState<string>(weekBounds.monday);
-  const [dateHasta, setDateHasta] = useState<string>(weekBounds.sunday);
+  // Filtro de la lista (estado + rango de fechas sobre updated_at) en el query
+  // string, no en estado local: recargar, volver atrás o abrir el enlace
+  // muestra la misma lista. Default = abiertas de la semana actual (lunes a
+  // domingo). Máximo 62 días entre desde y hasta. Se escribe con `replace`:
+  // cambiar un filtro no agrega entradas al historial.
+  const [searchParams, setSearchParams] = useSearchParams();
+  const { estado, desde: dateDesde, hasta: dateHasta } = parseChatFilters(searchParams);
+  // Un solo setSearchParams por evento: el `prev` de react-router no se
+  // encola como el de useState, dos llamadas seguidas se pisarían.
+  const updateFilters = (patch: Partial<ChatFilters>) =>
+    setSearchParams(prev => writeChatFilters(prev, { ...parseChatFilters(prev), ...patch }), { replace: true });
   const [rangeClampWarning, setRangeClampWarning] = useState('');
   // Modo proyeccion (docx S19/S20): el panel muestra conversaciones y
   // transcripciones ficticias para una demostracion comercial, sin tocar la
@@ -131,15 +108,26 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
   // Cuando se prepende historial (loadOlderMessages), guarda el scrollHeight
   // previo para compensar el salto visual una vez el DOM se actualiza.
   const prevScrollHeight = useRef<number | null>(null);
+  // Alcances contra respuestas obsoletas (ver whenCurrent en chatState). Cada
+  // conversación abierta tiene su AbortController, y cada combinación de
+  // filtros de la lista el suyo: al cambiar, el anterior se aborta, sus
+  // fetches en vuelo se cancelan y lo que resuelva tarde se descarta. Así una
+  // respuesta de la conversación A no pisa a la B, ni una lista vieja a la
+  // del filtro nuevo. Los handlers (enviar, archivar...) capturan el alcance
+  // vigente al empezar, antes de su primer await.
+  const convScope = useRef(new AbortController());
+  const listScope = useRef(new AbortController());
 
-  const loadConvs = () => {
+  const loadConvs = (signal: AbortSignal = listScope.current.signal) => {
     const params = new URLSearchParams({ estado });
     if (dateDesde) params.set('desde', dateDesde);
     if (dateHasta) params.set('hasta', dateHasta);
     if (modoDemo) params.set('modo', 'demo');
-    return apiFetch<{ items: Conversation[]; count: number }>(`/intouch/api/conversations?${params.toString()}`)
-      .then(d => { setConvs(d.items); setCount(d.count); })
-      .catch(console.error);
+    return whenCurrent(
+      signal,
+      apiFetch<{ items: Conversation[]; count: number }>(`/intouch/api/conversations?${params.toString()}`, { signal }),
+      d => { setConvs(d.items); setCount(d.count); },
+    );
   };
 
   const mergeNewer = (prev: Message[], incoming: Message[]) => {
@@ -154,87 +142,93 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
 
   // Trae la ultima pagina (mas reciente) y la reemplaza -- uso inicial al
   // abrir una conversacion.
-  const loadInitialMessages = (id: number) =>
-    apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`).then(d => {
+  const loadInitialMessages = (id: number, signal: AbortSignal) =>
+    whenCurrent(signal, apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`, { signal }), d => {
       setMessages(d.items);
       setHasMoreOlder(d.has_more);
-    }).catch(console.error);
+    });
 
   // Polling: solo agrega mensajes nuevos que no esten ya cargados, sin
   // descartar el historial anterior que el operador pudo haber cargado
   // scrolleando hacia arriba.
-  const loadMessages = (id: number) =>
-    apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`).then(d => {
+  const loadMessages = (id: number, signal: AbortSignal) =>
+    whenCurrent(signal, apiFetch<MessagesPage>(`/intouch/api/messages/${id}${queryDemo}`, { signal }), d => {
       setMessages(prev => mergeNewer(prev, d.items));
-    }).catch(console.error);
+    });
 
   const loadOlderMessages = async () => {
     if (activeId == null || loadingOlder || !hasMoreOlder || messages.length === 0) return;
+    const { signal } = convScope.current;
     const oldestId = messages[0].id;
     const el = messagesContainer.current;
     setLoadingOlder(true);
-    try {
-      const d = await apiFetch<MessagesPage>(`/intouch/api/messages/${activeId}?before_id=${oldestId}`);
-      if (el) prevScrollHeight.current = el.scrollHeight;
-      setMessages(prev => {
-        const known = new Set(prev.map(m => m.id));
-        return [...d.items.filter(m => !known.has(m.id)), ...prev];
-      });
-      setHasMoreOlder(d.has_more);
-    } catch (e) {
-      console.error(e);
-    } finally {
-      setLoadingOlder(false);
-    }
+    await whenCurrent(
+      signal,
+      apiFetch<MessagesPage>(`/intouch/api/messages/${activeId}?before_id=${oldestId}`, { signal }),
+      d => {
+        if (el) prevScrollHeight.current = el.scrollHeight;
+        setMessages(prev => {
+          const known = new Set(prev.map(m => m.id));
+          return [...d.items.filter(m => !known.has(m.id)), ...prev];
+        });
+        setHasMoreOlder(d.has_more);
+      },
+    );
+    // Si la conversación cambió mientras tanto, el efecto de abajo ya
+    // reinició loadingOlder para la nueva: no tocarlo desde la vieja.
+    if (!signal.aborted) setLoadingOlder(false);
   };
 
-  const loadDirectConv = (id: number) =>
-    apiFetch<Conversation>(`/intouch/api/conversations/${id}`).then(setDirectConv).catch(() => setDirectConv(null));
+  const loadDirectConv = (id: number, signal: AbortSignal) =>
+    whenCurrent(
+      signal,
+      apiFetch<Conversation>(`/intouch/api/conversations/${id}`, { signal }),
+      setDirectConv,
+      () => setDirectConv(null),
+    );
 
   useEffect(() => {
-    loadConvs();
-    const i = setInterval(loadConvs, 10000);
-    return () => clearInterval(i);
+    const scope = new AbortController();
+    listScope.current = scope;
+    loadConvs(scope.signal);
+    const i = setInterval(() => loadConvs(scope.signal), 10000);
+    return () => { scope.abort(); clearInterval(i); };
   }, [estado, dateDesde, dateHasta, modoDemo]);
-
-  useEffect(() => {
-    setActiveId(conversationId ? Number(conversationId) : null);
-  }, [conversationId]);
 
   // Clamp automatico a 62 dias entre desde/hasta. Si el user pone un rango
   // mayor, se ajusta el hasta y se muestra un aviso amarillo por 4s.
+  const warnClamped = () => {
+    setRangeClampWarning('Ajustado a máximo 62 días.');
+    setTimeout(() => setRangeClampWarning(''), 4000);
+  };
+
   const onDesdeChange = (v: string) => {
-    setDateDesde(v);
-    if (v && dateHasta) {
-      const clamped = clampMaxRange(v, dateHasta);
-      if (clamped !== dateHasta) {
-        setDateHasta(clamped);
-        setRangeClampWarning('Ajustado a máximo 62 días.');
-        setTimeout(() => setRangeClampWarning(''), 4000);
-      }
-    }
+    const clamped = v && dateHasta ? clampMaxRange(v, dateHasta) : dateHasta;
+    updateFilters({ desde: v, hasta: clamped });
+    if (clamped !== dateHasta) warnClamped();
   };
 
   const onHastaChange = (v: string) => {
-    if (dateDesde && v) {
-      const clamped = clampMaxRange(dateDesde, v);
-      if (clamped !== v) {
-        setDateHasta(clamped);
-        setRangeClampWarning('Ajustado a máximo 62 días.');
-        setTimeout(() => setRangeClampWarning(''), 4000);
-        return;
-      }
-    }
-    setDateHasta(v);
+    const clamped = dateDesde && v ? clampMaxRange(dateDesde, v) : v;
+    updateFilters({ hasta: clamped });
+    if (clamped !== v) warnClamped();
   };
 
   useEffect(() => {
-    if (activeId == null) { setMessages([]); setDirectConv(null); setHasMoreOlder(false); return; }
+    const scope = new AbortController();
+    convScope.current = scope;
+    // Nada de la conversación anterior sobrevive al cambio: ni sus mensajes
+    // (el polling de la nueva los mezclaría con mergeNewer) ni una carga de
+    // historial a medias.
+    setMessages([]);
+    setHasMoreOlder(false);
+    setLoadingOlder(false);
+    if (activeId == null) { setDirectConv(null); return () => scope.abort(); }
     stickToBottom.current = true;
-    loadInitialMessages(activeId);
-    loadDirectConv(activeId);
-    const i = setInterval(() => loadMessages(activeId), 5000);
-    return () => clearInterval(i);
+    loadInitialMessages(activeId, scope.signal);
+    loadDirectConv(activeId, scope.signal);
+    const i = setInterval(() => loadMessages(activeId, scope.signal), 5000);
+    return () => { scope.abort(); clearInterval(i); };
   }, [activeId, modoDemo]);
 
   const handleMessagesScroll = () => {
@@ -259,10 +253,13 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
 
   const send = async (t: string) => {
     if (activeId == null || modoDemo) return;
+    // El POST no lleva signal: el mensaje se manda aunque el operador cambie
+    // de chat. Sólo la relectura posterior queda atada a esta conversación.
+    const { signal } = convScope.current;
     await apiFetch('/intouch/api/admin/send-message', {
       method: 'POST', body: JSON.stringify({ conversation_id: activeId, text: t }),
     }).catch(console.error);
-    await loadMessages(activeId);
+    await loadMessages(activeId, signal);
   };
 
   // El header del chat siempre debe mostrar el wa_id COMPLETO (abrir una
@@ -280,6 +277,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
 
   const toggleHumanMode = async () => {
     if (activeId == null || togglingMode || !activeConv) return;
+    const { signal } = convScope.current;
     setTogglingMode(true);
     await apiFetch(`/intouch/api/conversations/${activeId}/mode`, {
       method: 'POST', body: JSON.stringify({ human_mode: !activeConv.human_mode }),
@@ -288,17 +286,18 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
     // conv activa quedo fuera del filtro 'estado' actual) — human_mode no
     // cambia si la conv sigue archivada/no archivada, entonces nunca
     // reaparece en `convs` y el fallback quedaria mostrando el estado viejo.
-    await Promise.all([loadConvs(), loadDirectConv(activeId)]);
+    await Promise.all([loadConvs(), loadDirectConv(activeId, signal)]);
     setTogglingMode(false);
   };
 
   const toggleArchive = async () => {
     if (activeId == null || archiving || !activeConv) return;
+    const { signal } = convScope.current;
     setArchiving(true);
     await apiFetch(`/intouch/api/conversations/${activeId}/archive`, {
       method: 'POST', body: JSON.stringify({ archived: !activeConv.archived }),
     }).catch(console.error);
-    await Promise.all([loadConvs(), loadDirectConv(activeId)]);
+    await Promise.all([loadConvs(), loadDirectConv(activeId, signal)]);
     setArchiving(false);
   };
 
@@ -357,7 +356,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
               <Button
                 key={e} size="sm"
                 variant={estado === e ? 'primary' : 'light-brand'}
-                onClick={() => setEstado(e)}
+                onClick={() => updateFilters({ estado: e })}
               >
                 {e === 'abiertas' ? 'Abiertas' : e === 'cerradas' ? 'Cerradas' : 'Todas'}
               </Button>
@@ -511,7 +510,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
                 conversationId={activeConv.id}
                 open={showIncidents}
                 onClose={() => setShowIncidents(false)}
-                onChanged={loadConvs}
+                onChanged={() => { loadConvs(); }}
               />
 
               <div

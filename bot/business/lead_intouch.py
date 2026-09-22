@@ -17,7 +17,9 @@ import re
 from django.conf import settings
 from django.utils import timezone
 
-from bot.models import Conversation, LeadInTouch, SenalesLead, calcular_score_intouch
+from bot.models import (
+    Conversation, LeadInTouch, SenalesLead, calcular_score_intouch, tiene_consentimiento,
+)
 
 logger = logging.getLogger(__name__)
 
@@ -34,6 +36,7 @@ CAMPOS_ESCRIBIBLES = frozenset({
     "cargo", "pais_ciudad", "situacion_contact_center", "tipo_contact_center",
     "usa_ia_actualmente", "canales_actuales", "volumen_interacciones",
     "necesidad_principal", "soluciones_interes", "intencion", "plazo_proyecto",
+    "preferencia_horaria",
     "solicita_consultoria", "solicita_contacto_humano",
     "resumen_conversacion", "siguiente_accion_recomendada",
 })
@@ -352,6 +355,9 @@ _CAMPOS_DEL_PAYLOAD = (
     "cargo", "pais_ciudad", "situacion_contact_center", "tipo_contact_center",
     "usa_ia_actualmente", "canales_actuales", "volumen_interacciones",
     "necesidad_principal", "soluciones_interes", "intencion", "plazo_proyecto",
+    # No es una hora reservada: es el día u horario que el contacto dijo que
+    # le acomoda. El help_text del modelo se mantiene.
+    "preferencia_horaria",
     "lead_score", "solicita_consultoria", "solicita_contacto_humano",
     "resumen_conversacion", "siguiente_accion_recomendada",
 )
@@ -362,8 +368,18 @@ def payload_del_lead(lead) -> dict:
     payload = {campo: getattr(lead, campo) for campo in _CAMPOS_DEL_PAYLOAD}
     # El teléfono lo agrega la PLATAFORMA desde los metadatos de WhatsApp, no
     # el modelo: el prompt le prohíbe pedirlo, pero el equipo comercial
-    # necesita a quién llamar.
-    payload["telefono"] = lead.conversation.wa_id
+    # necesita a quién llamar. Si hay texto de consentimiento y el contacto
+    # no lo otorgó, el número no sale; el resto del lead sí.
+    wa_id = lead.conversation.wa_id
+    texto = getattr(settings, "TEXTO_CONSENTIMIENTO", "") or ""
+    texto_configurado = bool(str(texto).strip())
+    if not texto_configurado or tiene_consentimiento(wa_id) is True:
+        payload["telefono"] = wa_id
+        if texto_configurado:
+            payload["consentimiento"] = "otorgado"
+    else:
+        payload["telefono"] = ""
+        payload["consentimiento"] = "pendiente"
     payload["origen"] = "wsp_intouch"
     payload["clave_contacto"] = clave_contacto(lead)
     payload["evento_id"] = lead.evento_id

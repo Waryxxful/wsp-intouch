@@ -729,6 +729,28 @@ def chequear_catalogo_intouch(opciones):
         yield Hallazgo(OK, "los tres modelos de operación están cargados")
 
 
+def chequear_texto_de_consentimiento(opciones):
+    """El teléfono no sale al CRM sin el aviso que tiene que definir legal.
+
+    Con el sink apagado no hay despacho, así que el texto vacío no es una
+    falla: el hueco queda preparado y el doctor se pone rojo recién cuando
+    el número puede salir.
+    """
+    texto = getattr(settings, "TEXTO_CONSENTIMIENTO", "") or ""
+    sink = getattr(settings, "LEAD_SINK", "none")
+    if sink != "none" and not str(texto).strip():
+        yield Hallazgo(
+            FALLA,
+            "el teléfono se despacha sin texto de consentimiento",
+            "LEAD_SINK no es none y TEXTO_CONSENTIMIENTO está vacío. "
+            "El teléfono sale al CRM sin el aviso que tiene que definir legal.",
+        )
+        return
+    yield Hallazgo(
+        OK, "el despacho del teléfono no queda sin texto de consentimiento",
+    )
+
+
 # --------------------------------------------------------------------------
 # whatsapp
 # --------------------------------------------------------------------------
@@ -771,7 +793,7 @@ SECCIONES = {
     "prompts": [chequear_prompts_activos, chequear_prompt_contra_fixture,
                 chequear_tools_del_prompt, chequear_tools_del_prompt_global,
                 chequear_vocabulario_del_prompt_armado],
-    "datos": [chequear_catalogo_intouch],
+    "datos": [chequear_catalogo_intouch, chequear_texto_de_consentimiento],
     "whatsapp": [chequear_whatsapp],
 }
 

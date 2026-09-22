@@ -279,16 +279,24 @@ from bot.simulator.models import CorridaDePrueba, EscenarioDePrueba, ResultadoDe
 
 # Modulo de migracion (nombre invalido como identificador Python por el
 # prefijo numerico -- se carga con importlib, igual que Django lo hace
-# internamente) -- reusa la MISMA funcion de siembra que usa la migracion
-# real (la ULTIMA que puebla la tabla, no una intermedia: 0002_seed_escenarios
-# sembraba los 8 escenarios automotrices heredados de wsp_cavem, que
-# 0003_escenarios_intouch borro; apuntar aca a 0002 resucitaria esos 8 en
-# cada _fixture_teardown de EjecutarCorridaTest, silenciosamente, para el
-# resto de la sesion de test) en vez de duplicarla a mano en este archivo de
-# test (ver EjecutarCorridaTest._fixture_teardown mas abajo).
-_seed_escenarios = importlib.import_module(
-    "bot.simulator.migrations.0003_escenarios_intouch",
-).poblar_escenarios_intouch
+# internamente) -- reusa las MISMAS funciones de siembra que usan las
+# migraciones reales (la ULTIMA que puebla la tabla, no una intermedia:
+# 0002_seed_escenarios sembraba los 8 escenarios automotrices heredados de
+# wsp_cavem, que 0003_escenarios_intouch borro; apuntar aca a 0002
+# resucitaria esos 8 en cada _fixture_teardown de EjecutarCorridaTest,
+# silenciosamente, para el resto de la sesion de test). 0004 suma
+# reclamo-contra-intouch: sin esa llamada, el flush deja el set corto y
+# test_escenarios_intouch falla en la misma sesion.
+def _resembrar_escenarios(apps, schema_editor):
+    importlib.import_module(
+        "bot.simulator.migrations.0003_escenarios_intouch",
+    ).poblar_escenarios_intouch(apps, schema_editor)
+    importlib.import_module(
+        "bot.simulator.migrations.0004_escenario_reclamo_contra_intouch",
+    ).poblar_reclamo_contra_intouch(apps, schema_editor)
+
+
+_seed_escenarios = _resembrar_escenarios
 
 
 class IniciarCorridaTest(TestCase):
@@ -348,9 +356,10 @@ class EjecutarCorridaTest(TransactionTestCase):
     _fixture_teardown() de mas abajo deja que Django haga su flush()
     normal (que SI recrea content types/permisos via la señal
     post_migrate, sin pisar nada) y solo reinserta la semilla propia de
-    este dominio (los EscenarioDePrueba de la migracion
-    0003_escenarios_intouch) despues -- sin la cual test_simulator_seed_migration.py
-    encontraria la tabla vacia para el resto de la sesion de test."""
+    este dominio (los EscenarioDePrueba de 0003_escenarios_intouch y
+    0004_escenario_reclamo_contra_intouch) despues -- sin la cual
+    test_simulator_seed_migration.py y test_escenarios_intouch
+    encontrarian la tabla vacia o corta para el resto de la sesion de test."""
 
     def _fixture_teardown(self):
         super()._fixture_teardown()

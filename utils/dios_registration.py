@@ -68,6 +68,8 @@ def notify_schema_updated():
 NOTIFY_TYPES = [
     {"codigo": "lead_hot", "rol_minimo": "agente",
      "descripcion": "Una oportunidad comercial calificó como HOT"},
+    {"codigo": "caso_equipo", "rol_minimo": "agente",
+     "descripcion": "Hay un caso o una derivación para que el equipo lo tome"},
 ]
 
 

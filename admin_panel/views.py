@@ -1352,9 +1352,9 @@ def api_leads_intouch(request):
     """Los leads comerciales B2B de InTouch, para el panel (Task 18 del spec).
 
     Hoy es la UNICA via por la que el equipo comercial ve una oportunidad: no
-    existe todavia ningun endpoint de leads en el orquestador, y el adaptador
-    de salida de este bot arranca apagado (LEAD_SINK=none) hasta que se
-    construya su destino. Un lead que no aparece aca no lo trabaja nadie.
+    existe todavia ningun endpoint de leads en el orquestador. El sink se
+    configura con LEAD_SINK y el default de código sigue siendo none. Un lead
+    que no aparece aca no lo trabaja nadie.
 
     No comparte nombre ni ruta con `api_leads` (el lead automotriz heredado,
     `LeadComercial`): son modelos y verticales distintos, y ese endpoint sigue
@@ -1400,6 +1400,7 @@ def api_leads_intouch(request):
                 "soluciones_interes": lead.soluciones_interes or [],
                 "intencion": lead.intencion,
                 "plazo_proyecto": lead.plazo_proyecto,
+                "preferencia_horaria": lead.preferencia_horaria,
                 "lead_score": lead.lead_score,
                 "solicita_consultoria": lead.solicita_consultoria,
                 "solicita_contacto_humano": lead.solicita_contacto_humano,

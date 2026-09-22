@@ -29,6 +29,16 @@ class ApiLeadsTest(TestCase):
             conversation=Conversation.objects.create(wa_id="56900000021"),
             empresa="Otra SpA", lead_score="COLD")
 
+    def test_incluye_la_preferencia_horaria(self):
+        lead = LeadInTouch.objects.get(empresa="Acme SpA")
+        lead.preferencia_horaria = "martes por la mañana"
+        lead.save(update_fields=["preferencia_horaria"])
+        resp = self.client.get("/demo/api/leads")
+        self.assertEqual(resp.status_code, 200)
+        datos = json.loads(resp.content)
+        primero = next(l for l in datos["leads"] if l["empresa"] == "Acme SpA")
+        self.assertEqual(primero["preferencia_horaria"], "martes por la mañana")
+
     def test_devuelve_los_leads_con_su_telefono(self):
         resp = self.client.get("/demo/api/leads")
         self.assertEqual(resp.status_code, 200)

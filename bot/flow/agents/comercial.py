@@ -13,6 +13,7 @@ from pathlib import Path
 
 from django.core.exceptions import ImproperlyConfigured
 
+from bot.flow.contexto_turno import bloque_contexto_turno
 from bot.flow.respuesta import bloque_contrato_respuesta
 
 from ._common import (bloque_fecha_actual, bloque_nombre_contacto,
@@ -70,8 +71,11 @@ class ComercialAgent:
         # en el historial -- de hecho decia "de nuevo", o sea que lo sabia. La
         # otra defensa (_quitar_saludo_inicial) es una lista blanca de palabras
         # y ya falló en la primera prueba real.
+        # Junto a la fecha, y solo en este especialista: los de autos no lo
+        # leen. Va después de la fecha para no mover el prefijo de cache.
         return (
             f"{bloque_fecha_actual()}"
+            f"{bloque_contexto_turno(state)}"
             f"{effective_prompt}"
             f"{bloque_nombre_contacto(state)}{bloque_numero_contacto(state)}"
             f"{bloque_flow_data}{bloque_ya_saludado(state)}"

@@ -228,7 +228,7 @@ def _enviar(conv_pk: int, wa_id: str, partes: list[str], modelo_imagen: str | No
                                  metadatos["nombre_agente"], conv=conv)
             _recordar_extraccion(wa_id, meta)
             _vigilar_racha_del_extractor(conv, meta)
-            _persistir_metadatos(conv, meta)
+            _persistir_metadatos(conv, meta, wa=wa)
         if modelo_imagen:
             _enviar_imagen(conv, wa, modelo_imagen)
         for sucursal_id in sucursal_ids:
@@ -400,16 +400,88 @@ def _extraer_sync(prosa: str, mensaje_cliente: str, nombre_agente: str,
         prosa, mensaje_cliente, nombre_agente, historial=historial))
 
 
-def _persistir_metadatos(conv, meta: dict) -> None:
+def _enviar_aviso_de_consentimiento(conv, wa) -> None:
+    """Manda el texto de legal una sola vez, por el mismo camino que las partes 2..N.
+
+    No se llama a `encolar`: esto corre dentro de `_enviar`, y el ejecutor de
+    la cola tiene un solo thread. Volver a encolar y esperar se quedaría
+    bloqueado esperándose a sí mismo. `wa.send_text` + `_guardar` es el camino
+    que ya usa el loop de partes; la conversación ya existe porque `_enviar`
+    la cargó antes de llegar acá.
+
+    El texto sale tal cual está en TEXTO_CONSENTIMIENTO. Si está vacío, no se
+    manda nada.
+    """
+    from django.conf import settings
+
+    from bot.models import tiene_consentimiento
+
+    texto = getattr(settings, "TEXTO_CONSENTIMIENTO", "") or ""
+    if not str(texto).strip():
+        return
+    if tiene_consentimiento(conv.wa_id) is True:
+        return
+    flow = conv.get_flow()
+    if flow.get("consentimiento_enviado"):
+        return
+    try:
+        wa.send_text(conv.wa_id, texto)
+        _guardar(conv, texto)
+    except Exception:
+        # No se marca: el próximo turno puede reintentar. Un fallo de esta
+        # burbuja no puede comerse el handoff que viene después.
+        logger.warning(
+            "[cola] no pude mandar el aviso de consentimiento a %s",
+            conv.wa_id, exc_info=True,
+        )
+        return
+    flow["consentimiento_enviado"] = True
+    conv.set_flow(flow)
+    conv.save(update_fields=["flow_data"])
+
+
+def _registrar_caso_para_el_equipo(conv, kind: str, context: dict, mensaje: str) -> None:
+    """Deja el incidente y avisa sólo si este llamado lo creó.
+
+    `registrar_incidente` dedupea mientras haya uno abierto del mismo kind y
+    devuelve el viejo. Avisar igual repetía la campanita: hubo 6 avisos por
+    un solo cliente. En este hilo se mira si ya había un abierto antes de
+    llamar; si lo había, no se notifica.
+    """
+    from bot.models import Incident, registrar_incidente
+
+    ya_habia_abierto = Incident.objects.filter(
+        conversation=conv, kind=kind, status="abierto",
+    ).exists()
+    registrar_incidente(conv, kind, context=context)
+    if ya_habia_abierto:
+        return
+    try:
+        from bot import notify
+
+        notify.notificar(
+            tipo="caso_equipo",
+            mensaje=mensaje,
+            url="/wsp/intouch/conversaciones",
+        )
+    except Exception:
+        logger.warning(
+            "[cola] no pude avisar al equipo el caso %s de %s",
+            kind, conv.wa_id, exc_info=True,
+        )
+
+
+def _persistir_metadatos(conv, meta: dict, wa=None) -> None:
     """Guarda en la Conversation lo que el extractor saco de la prosa.
 
     Mismo criterio que el bloque post-grafo de bot/whatsapp/handlers.py: un
     campo vacio o None NO pisa el valor previo. El extractor puede no tener
     evidencia de algo que el turno anterior si sabia, y perderlo seria peor que
     no actualizarlo.
-    """
-    from bot.models import registrar_incidente
 
+    `wa`, si viene, es el cliente que ya usó el loop de partes. Sirve para la
+    burbuja de consentimiento; sin él no se manda.
+    """
     if not meta:
         return
     cambio = False
@@ -440,16 +512,18 @@ def _persistir_metadatos(conv, meta: dict) -> None:
     from bot.business.lead_intouch import registrar_lead_del_turno
 
     registrar_lead_del_turno(conv.wa_id, meta.get("lead"))
+    if wa is not None:
+        _enviar_aviso_de_consentimiento(conv, wa)
     # Los incidentes van DESPUES del save: si el save falla, no queremos haber
     # notificado al equipo comercial por un turno que no quedo guardado.
     if meta.get("handoff"):
-        registrar_incidente(conv, "handoff", context={
+        _registrar_caso_para_el_equipo(conv, "handoff", {
             "reason": meta.get("handoff_reason"),
             "specialist": conv.active_agent,
             "origen": "extractor",
-        })
+        }, "Hay una derivación para que el equipo la tome.")
     if meta.get("requiere_revision"):
-        registrar_incidente(conv, "revision_requerida", context={
+        _registrar_caso_para_el_equipo(conv, "revision_requerida", {
             "motivo": meta.get("motivo_revision"),
             "origen": "extractor",
-        })
+        }, "Hay un caso para que el equipo lo tome.")

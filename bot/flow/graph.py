@@ -1006,7 +1006,11 @@ async def _generar_del_especialista(
     llm_con_tools = llm.bind_tools([*tools, responder])
     effective_prompt = await sync_to_async(agent.effective_prompt)()
     global_prompt = await sync_to_async(get_effective_global_prompt)()
-    system_prompt = agent.build_system_prompt(state, f"{global_prompt}\n\n---\n\n{effective_prompt}")
+    # El comercial lee horario, preferencia y consentimiento al armar el
+    # prompt. En el event loop esa consulta bloquea a los demás contactos
+    # del worker; sync_to_async es el mismo camino que effective_prompt.
+    system_prompt = await sync_to_async(agent.build_system_prompt)(
+        state, f"{global_prompt}\n\n---\n\n{effective_prompt}")
     mensajes = _construir_mensajes(state, system_prompt)
 
     return await _ainvoke_tools_json_with_retry(

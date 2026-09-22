@@ -1,3 +1,4 @@
+import logging
 from datetime import timedelta
 
 from asgiref.sync import sync_to_async
@@ -10,7 +11,29 @@ from bot.models import (
     crear_caso as _crear_caso_db,
 )
 
+logger = logging.getLogger(__name__)
+
 _CASO_DEDUP_VENTANA = timedelta(minutes=5)
+
+# El tipo que ve el equipo en la campanita, no el código del enum.
+_ETIQUETA_DE_CASO = {
+    "soporte": "soporte",
+    "empleo": "empleo",
+    "proveedor": "proveedor",
+    "reclamo": "reclamo",
+    "datos_personales": "datos personales",
+    "otro": "otro",
+}
+
+
+def _mensaje_caso_equipo(tipo: str, resumen: str) -> str:
+    etiqueta = _ETIQUETA_DE_CASO.get(tipo, (tipo or "otro").replace("_", " "))
+    corto = " ".join((resumen or "").split())
+    if len(corto) > 140:
+        corto = corto[:139].rstrip() + "…"
+    if corto:
+        return f"Llegó un caso de {etiqueta}: {corto}"
+    return f"Llegó un caso de {etiqueta}."
 
 
 def _registrar_no_contactar_impl(wa_id: str = "", motivo: str = "") -> dict:
@@ -83,8 +106,20 @@ def _crear_caso_impl(wa_id: str, tipo: str, resumen: str) -> dict:
         ).order_by("-created_at")
         for candidato in candidatos:
             if kind != "otro" or candidato.context.get("tipo_original") == tipo:
+                # El dedup no avisa: en producción un handoff repetido generó
+                # 6 avisos para un solo cliente.
                 return {"ok": True, "caso_id": candidato.id}
     caso = _crear_caso_db(conversation, tipo, resumen)
+    try:
+        from bot import notify
+
+        notify.notificar(
+            tipo="caso_equipo",
+            mensaje=_mensaje_caso_equipo(tipo, resumen),
+            url="/wsp/intouch/conversaciones",
+        )
+    except Exception:
+        logger.warning("[caso] no pude notificar el caso de %s", wa_id, exc_info=True)
     return {"ok": True, "caso_id": caso.id}
 
 
@@ -95,12 +130,13 @@ async def crear_caso(tipo: str, resumen: str, runtime: ToolRuntime) -> dict:
     consultas que NO son comerciales: soporte de un servicio que el contacto ya
     tiene, postulaciones de empleo, ofertas de proveedores, reclamos, y
     cualquier solicitud sobre datos personales. Distinto de un handoff: el
-    handoff deriva ESTA conversación a una persona ahora; crear_caso deja un
-    registro estructurado que se puede usar junto con el handoff o sin él.
+    handoff deriva ESTA conversación a una persona ahora; crear_caso deja el
+    caso para el equipo, junto con el handoff o sin él.
 
-    Después de llamarla, dile al contacto con claridad que su consulta queda
-    registrada para el área correspondiente, y no la trates como una
-    oportunidad comercial.
+    Después de llamarla, dile: "dejo tu caso listo para que el equipo lo tome".
+    No digas que quedó registrado, no des un número de caso y no prometas
+    "hoy" ni un horario. El caso_id que devuelve esta herramienta es interno:
+    no se lo leas al contacto. No trates el caso como una oportunidad comercial.
 
     Args:
         tipo: soporte|empleo|proveedor|reclamo|datos_personales|otro

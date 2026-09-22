@@ -24,6 +24,7 @@ interface Lead {
   soluciones_interes: string[];
   intencion: string;
   plazo_proyecto: string;
+  preferencia_horaria: string;
   lead_score: string;
   solicita_consultoria: boolean;
   solicita_contacto_humano: boolean;
@@ -363,6 +364,7 @@ export function LeadsPage() {
             )}
             <div className="col-md-6"><strong>País / ciudad:</strong> {guion(seleccionado.pais_ciudad)}</div>
             <div className="col-md-6"><strong>Plazo del proyecto:</strong> {guion(seleccionado.plazo_proyecto)}</div>
+            <div className="col-md-6"><strong>Preferencia horaria:</strong> {guion(seleccionado.preferencia_horaria)}</div>
             <div className="col-md-6"><strong>Volumen de interacciones:</strong> {guion(seleccionado.volumen_interacciones)}</div>
             <div className="col-md-6">
               <strong>Usa IA actualmente:</strong>{' '}

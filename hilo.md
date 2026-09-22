@@ -349,3 +349,22 @@ lanzar la recuperación en paralelo con gen#1 usando el mensaje crudo del
 contacto. Antes de construirla hay que medir la tasa de acierto de esa consulta
 contra la que realmente pide gen#1 — que es exactamente la pregunta que hundió
 el prefetch en cavem (36 % de tool errada).
+
+## 2026-09-22 — Demo 15-09, frentes A a E
+
+Plan: `auditoria latencia/plan-mejoras-15-09-demo-intouch.md`. Sin commit y
+sin reiniciar el contenedor.
+
+- `crear_caso` pide decir «dejo tu caso listo para que el equipo lo tome» y
+  avisa `caso_equipo` solo al crear el incidente. El prompt reconoce el
+  derecho a reclamar y no tutoriza un reclamo ante el SERNAC. La frase de
+  escape deja de ser la salida del precio, el plazo y la integración.
+- Cada turno del comercial recibe `https://in-touch.cl`, los tres modelos y
+  la franja de `BusinessHours`. «Copiloto» no se inventa: se dice que no está
+  en el catálogo. El armado del prompt va por `sync_to_async`.
+- `preferencia_horaria` viaja al CRM y al detalle de leads del panel. Con
+  `TEXTO_CONSENTIMIENTO` vacío el teléfono sigue saliendo, y el doctor queda
+  en FALLA si `LEAD_SINK` no es `none`. Con el texto puesto, el número no
+  sale hasta un consentimiento otorgado y la burbuja se manda una vez.
+- No se cargaron las cifras de la home (falta la ficha firmada) ni se tocó
+  la ronda de tool. 119 tests de estos módulos, OK.

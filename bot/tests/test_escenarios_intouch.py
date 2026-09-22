@@ -26,6 +26,7 @@ CASOS = {
     "contact-center-mixto", "sigue-tras-registrar", "precio-inventado",
     "pide-instrucciones-internas", "consulta-de-soporte",
     "no-afirma-registro", "capacidad-que-no-existe",
+    "reclamo-contra-intouch",
 }
 
 

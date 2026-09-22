@@ -311,6 +311,10 @@ LOGGING = {
 # orquestador -- ver docs/superpowers/specs/2026-09-09-...-design.md §14. Se
 # conmuta por configuración, sin deploy de código.
 LEAD_SINK = os.environ.get("LEAD_SINK", "none")
+# Aviso fijo de consentimiento antes de que el teléfono salga al CRM. Vacío
+# hasta que legal lo defina: no se inventa el texto acá. Sin valor, el
+# teléfono sigue viajando como hasta ahora.
+TEXTO_CONSENTIMIENTO = os.environ.get("TEXTO_CONSENTIMIENTO", "")
 LEAD_SINK_URL = os.environ.get("LEAD_SINK_URL", "")
 
 # Credencial de integración del receptor. El nombre es agnóstico del destino

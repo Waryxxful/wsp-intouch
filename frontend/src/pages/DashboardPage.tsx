@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, StatsCard, Badge, Alert, ApexChart, ChartCard, PageHeader, Select, LoadingState } from '@duralux/ui';
 import { apiFetch } from '../api';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface ChartPoint { date: string; count: number; }
 interface AgentDist { active_agent: string; count: number; }
@@ -148,6 +149,8 @@ function funnelDisplayData(stages: FunnelStage[]): number[] {
 }
 
 export function DashboardPage({ basename }: { basename: string }) {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  const inicio = useBreadcrumbLink(basename);
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [range, setRange] = useState('7d');
@@ -212,7 +215,7 @@ export function DashboardPage({ basename }: { basename: string }) {
       )}
       <PageHeader
         title="Asesor Comercial IA — Dashboard"
-        breadcrumbs={[{ label: 'Inicio', href: basename }, { label: 'Dashboard' }]}
+        breadcrumbs={[{ label: 'Inicio', ...inicio }, { label: 'Dashboard' }]}
       >
         <div className="form-check form-switch me-3">
           <input

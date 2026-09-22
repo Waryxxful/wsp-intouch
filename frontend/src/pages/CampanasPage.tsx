@@ -1,6 +1,7 @@
 import { useEffect, useState } from 'react';
 import { Card, PageHeader, Badge, Button, Modal, Textarea, Alert, LoadingState, StatsCard } from '@duralux/ui';
 import { apiFetch } from '../api';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface Campana {
   id: number;
@@ -40,6 +41,9 @@ const COLUMNAS_EMBUDO: { key: keyof Campana; label: string }[] = [
 ];
 
 export function CampanasPage() {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  // '..' relativo a la ruta, no a la URL: desde "leads" es la raíz del remoto.
+  const inicio = useBreadcrumbLink('..');
   const [campanas, setCampanas] = useState<Campana[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -101,7 +105,7 @@ export function CampanasPage() {
           Desactivá “Proyección demo” para ver los datos efectivos.
         </Alert>
       )}
-      <PageHeader title="Campañas" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Campañas' }]}>
+      <PageHeader title="Campañas" breadcrumbs={[{ label: 'Asesor Comercial IA', ...inicio }, { label: 'Campañas' }]}>
         <div className="form-check form-switch me-3">
           <input
             className="form-check-input"

@@ -7,6 +7,7 @@ import {
   clampMaxRange, conversationTarget, parseChatFilters, parseConversationId,
   whenCurrent, writeChatFilters, type ChatFilters,
 } from '../chat/chatState';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface Conversation {
   id: number;
@@ -58,6 +59,8 @@ function formatMessageTime(iso: string): string {
 }
 
 export function ChatOperatorPage({ basename }: { basename: string }) {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  const inicio = useBreadcrumbLink(basename);
   const { conversationId } = useParams();
   const navigate = useNavigate();
   const location = useLocation();
@@ -329,7 +332,7 @@ export function ChatOperatorPage({ basename }: { basename: string }) {
       )}
       <PageHeader
         title="Chat"
-        breadcrumbs={[{ label: 'Inicio', href: basename }, { label: 'Chat' }]}
+        breadcrumbs={[{ label: 'Inicio', ...inicio }, { label: 'Chat' }]}
       >
         <div className="form-check form-switch me-3">
           <input

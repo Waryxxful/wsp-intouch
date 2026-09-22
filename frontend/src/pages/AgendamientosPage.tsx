@@ -2,6 +2,7 @@ import { useEffect, useState } from 'react';
 import { Card, PageHeader, Badge, DataTable, Select, StatsCard, LoadingState, Alert } from '@duralux/ui';
 import type { BadgeProps, DataTableColumn } from '@duralux/ui';
 import { apiFetch } from '../api';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface Reserva {
   codigo: string;
@@ -28,6 +29,9 @@ function km(valor: number | null): string {
 }
 
 export function AgendamientosPage() {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  // '..' relativo a la ruta, no a la URL: desde "leads" es la raíz del remoto.
+  const inicio = useBreadcrumbLink('..');
   const [reservas, setReservas] = useState<Reserva[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState('');
@@ -102,7 +106,7 @@ export function AgendamientosPage() {
           Desactivá “Proyección demo” para ver los datos efectivos.
         </Alert>
       )}
-      <PageHeader title="Agendamientos" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Agendamientos' }]}>
+      <PageHeader title="Agendamientos" breadcrumbs={[{ label: 'Asesor Comercial IA', ...inicio }, { label: 'Agendamientos' }]}>
         <div className="form-check form-switch me-3">
           <input
             className="form-check-input"

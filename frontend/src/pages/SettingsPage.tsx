@@ -19,6 +19,7 @@ import { LogsPanel } from '../panels/LogsPanel';
 import { AuditPanel } from '../panels/AuditPanel';
 import { TestScenariosPanel } from '../panels/TestScenariosPanel';
 import { EncuestasPanel } from '../panels/EncuestasPanel';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface Props { session: GranCrmSession; bus: EventBus; basename: string; }
 
@@ -41,9 +42,11 @@ const settingsNav = [
 ];
 
 export function SettingsPage({ session, basename }: Props) {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  const inicio = useBreadcrumbLink(basename);
   return (
     <>
-      <PageHeader title="Configuración" breadcrumbs={[{ label: 'Inicio', href: basename }, { label: 'Configuración' }]} />
+      <PageHeader title="Configuración" breadcrumbs={[{ label: 'Inicio', ...inicio }, { label: 'Configuración' }]} />
       {/* main-content afuera del PageHeader, mismo motivo que DashboardPage --
           PageHeader ya trae 30px de padding propio. gx-3 (no gy) + mt-4:
           "row g-3" justo debajo de PageHeader (z-index alto) queda tapado por

@@ -3,6 +3,7 @@ import { useNavigate } from 'react-router-dom';
 import { Card, PageHeader, Badge, DataTable, Modal, Select, Icon, LoadingState, Alert } from '@duralux/ui';
 import type { BadgeProps, DataTableColumn } from '@duralux/ui';
 import { apiFetch } from '../api';
+import { useBreadcrumbLink } from '../nav/useBreadcrumbLink';
 
 interface Lead {
   id: number;
@@ -90,6 +91,9 @@ function relativo(iso: string): string {
 }
 
 export function LeadsPage() {
+  // Breadcrumb a la raíz del remoto sin recargar el shell (ver useBreadcrumbLink).
+  // '..' relativo a la ruta, no a la URL: desde "leads" es la raíz del remoto.
+  const inicio = useBreadcrumbLink('..');
   const navigate = useNavigate();
   const [leads, setLeads] = useState<Lead[]>([]);
   const [loading, setLoading] = useState(true);
@@ -273,7 +277,7 @@ export function LeadsPage() {
 
   return (
     <>
-      <PageHeader title="Leads" breadcrumbs={[{ label: 'Asesor Comercial IA', href: '.' }, { label: 'Leads' }]} />
+      <PageHeader title="Leads" breadcrumbs={[{ label: 'Asesor Comercial IA', ...inicio }, { label: 'Leads' }]} />
       <div className="main-content">
         <div className="row g-4">
           <div className="col-12">

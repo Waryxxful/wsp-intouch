@@ -194,12 +194,19 @@ archivo del repo.
 cd /home/admincrm/wsp_intouch/frontend
 corepack pnpm@9.15.0 install
 corepack pnpm@9.15.0 build
-cp -r dist/. /home/admincrm/staticfiles/mf/wsp_intouch/
+sh /home/admincrm/gateway/scripts/publicar_estaticos.sh dist /home/admincrm/staticfiles/mf/wsp_intouch
+/home/admincrm/gateway/scripts/verificar_rutas.sh
 ```
 
-**`pnpm build` por sí solo no despliega nada**: sin el `cp` a `staticfiles`,
+**`pnpm build` por sí solo no despliega nada**: sin publicar a `staticfiles`,
 nginx sigue sirviendo lo anterior. Es el error más repetido de este
 ecosistema.
+
+**Se publica con `publicar_estaticos.sh`, no con `cp -r`** (desde el
+2026-09-22). El script copia primero los chunks nuevos sin borrar los
+viejos, reemplaza `remoteEntry.js` con un `mv` atómico y poda sólo lo que no
+esté en las dos últimas publicaciones. Así, una pestaña que ya tenía abierto
+el panel no se queda sin los chunks que va a pedir al navegar.
 
 Es el pico de memoria de todo este trabajo (`pnpm build` pasa 1 GB) y el host
 tiene swap en uso: **conviene no correrlo en paralelo con otro build** en el

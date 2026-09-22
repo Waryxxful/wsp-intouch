@@ -210,11 +210,20 @@ class GraphSmokeTest(TestCase):
 
     @patch("bot.flow.graph._get_llm")
     @patch("bot.flow.graph._ainvoke_with_retry", new_callable=AsyncMock)
-    def test_sin_campaign_hint_el_supervisor_clasifica_con_el_llm(self, mock_llm, mock_get_llm):
-        # InTouch (Task 8): "comercial" es el unico slug que el registro real
-        # acepta -- adaptado de "agendamiento". La defensa (el supervisor usa
-        # la clasificacion del LLM) no depende del slug concreto.
-        mock_llm.return_value = '{"agente": "comercial"}'
+    def test_un_solo_especialista_registrado_no_llama_al_ruteo(self, mock_llm, mock_get_llm):
+        # Hasta el 2026-09-21 este test se llamaba
+        # `test_sin_campaign_hint_el_supervisor_clasifica_con_el_llm` y exigia
+        # lo contrario: que el supervisor SIEMPRE clasificara con el LLM. Eso
+        # era correcto cuando AGENTS tenia cinco especialistas automotrices;
+        # con el registro de InTouch (`comercial` y nada mas, ver
+        # bot/flow/agents/__init__.py) la clasificacion solo puede devolver el
+        # unico slug que existe, y medirlo costo 1,01s de media en el 100% de
+        # los turnos -- el 17% del turno (Langfuse, 56 turnos del 2026-09-15;
+        # `manage.py medir_latencia --desde 2026-09-15`).
+        #
+        # No alcanza con que sea inutil: es una llamada de red mas que puede
+        # fallar. El 403 de prompt injection del 2026-09-02 (docs/PENDIENTES.md
+        # #16) tumbo turnos enteros desde exactamente esta llamada.
         llm_con_tools = AsyncMock()
         llm_con_tools.ainvoke.return_value = AIMessage(
             content='{"mensaje": "dale, para cuando?", "extracted_data": {}, "next_state": null, "handoff": false}',
@@ -229,7 +238,7 @@ class GraphSmokeTest(TestCase):
 
         self.assertEqual(result["active_agent"], "comercial")
         self.assertEqual(result["response_text"], "dale, para cuando?")
-        mock_llm.assert_called_once()  # solo el supervisor
+        mock_llm.assert_not_called()  # NINGUNA llamada de ruteo
         llm_con_tools.ainvoke.assert_called_once()  # solo el especialista
 
     @patch("bot.flow.graph._get_llm")
@@ -739,6 +748,14 @@ class GraphCustomSpecialistTest(TransactionTestCase):
 
         self.assertEqual(result["active_agent"], "envios")
         self.assertEqual(result["response_text"], "tu pedido esta en camino")
+        # La otra mitad del bypass de ruteo: con DOS especialistas en el
+        # registro la clasificacion vuelve sola, sin que nadie se acuerde de
+        # reactivarla. Su par es
+        # GraphSmokeTest::test_un_solo_especialista_registrado_no_llama_al_ruteo,
+        # que exige lo contrario con un registro de uno. Los dos juntos son lo
+        # que hace que el atajo dependa del entorno y no de la disciplina: un
+        # especialista creado desde el panel restituye el ruteo al instante.
+        mock_llm.assert_called_once()
 
 
 class SpecialistNodeGlobalPromptTest(TransactionTestCase):

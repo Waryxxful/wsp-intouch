@@ -36,15 +36,37 @@ class SupervisorHistorialTest(TestCase):
         )
 
     def _prompt_enviado(self, messages):
-        """Corre supervisor_node con el LLM mockeado y devuelve el prompt."""
+        """Corre supervisor_node con el LLM mockeado y devuelve el prompt.
+
+        El registro se parcha con DOS especialistas a proposito. Desde el
+        2026-09-21 `supervisor_node` devuelve el unico slug sin llamar al LLM
+        cuando el registro tiene uno solo (que es el caso real de InTouch), asi
+        que con el registro de verdad no hay prompt de ruteo que inspeccionar y
+        estos tests morian con KeyError en vez de medir su defensa.
+
+        Se sigue entrando por `supervisor_node` y no por `_rutear_con_el_llm`:
+        el prompt tiene que salir mal por el camino que usa produccion. Ninguno
+        de los dos slugs es `_AGENTE_ESPECULADO`, para que la especulacion no
+        se dispare y el unico LLM que participe sea el del ruteo.
+        """
         import asyncio
         capturado = {}
 
+        class _AgenteFalso:
+            def __init__(self, descripcion):
+                self.descripcion = descripcion
+
+        registro = {
+            "comercial": _AgenteFalso("Consultas comerciales."),
+            "envios": _AgenteFalso("Estado de un envio."),
+        }
+
         async def _falso(llm, prompt, label="", **kw):
             capturado["prompt"] = prompt
-            return '{"agente": "ventas", "intencion_compra_real": false}'
+            return '{"agente": "comercial", "intencion_compra_real": false}'
 
         with patch.object(g, "_ainvoke_with_retry", new=_falso), \
+             patch.object(g, "build_agent_registry", new=lambda: registro), \
              patch.object(g, "_get_routing_llm", new=AsyncMock(return_value=object())):
             asyncio.run(g.supervisor_node(self._estado(messages)))
         return capturado["prompt"]

@@ -297,12 +297,61 @@ de lead** con su score, y las **secciones del `doctor`**.
 | Registro en DIOS | verificado **en la BD del orquestador**: `activo=True`, `:8040`, `schemas=intouch` |
 | Circuito con el CRM | E2E contra el receptor real, dos ramas (creación y replay), base limpia después |
 
-**Sin medir todavía:** el recall del RAG (falta indexar) y la latencia (el
-simulador no se corrió: exige confirmación puntual y gasta llamadas reales).
+**Sin medir todavía:** el recall del RAG (falta indexar). ~~La latencia~~ —
+medida el 2026-09-21 contra las trazas reales, ver §4.
 
 ---
 
-## 4. Por qué Cavem no se apagó cuando debía
+## 4. Latencia — medida el 2026-09-21
+
+Informe completo en `auditoria latencia/2026-09-21-medicion-y-correccion.md`.
+Reproducible con `manage.py medir_latencia --desde 2026-09-15`.
+
+**El turno es 5,94 s de media y 3,99 s de mediana** (n=56, 2026-09-15). Los
+7,6 s que se venían repitiendo **no son la latencia del turno**: son la media
+de `extract-metadata` (7,72 s), que corre en la cola después del envío.
+
+Reparto: CABEZA (ORM/contexto) 0,05 s p50 · LLM 4,75 s de media · COLA
+(lead/CRM/POST a Meta) 0,74 s p50. **El turno es LLM**; nuestro código pesa
+~0,8 s.
+
+### 4.1 Hecho
+
+- **`manage.py medir_latencia`** — el banco reproducible. Cierra la deuda §VI.3
+  de la biblia para este repo (falta portarlo a `wsp_cavem`).
+- **Bypass del ruteo con un solo especialista** — `classify-intent` costaba
+  1,01 s de media en el **100 %** de los turnos para elegir entre una opción.
+  Anclado por un par de tests que exigen lo contrario uno del otro, así que un
+  `CustomSpecialist` creado desde el panel restituye la clasificación solo.
+- **Instrumentación de la CABEZA** — `preparar-contexto`,
+  `antecedentes-faltantes` y `resolver-especialista` son spans propios.
+
+### 4.2 Abierto, por tamaño
+
+1. **La ronda de tool es la masa real.** 19 de 56 turnos la tienen y miden
+   10,08 s de media contra 3,82 s los demás. Una tool cuesta su ejecución
+   **más una generación entera**. La dominante es
+   `consultar_base_conocimiento` (RAG): 11 de 22 llamadas, ~3,3 s de media.
+   Necesita diseño y experimento propio — y ojo con la biblia §III.2, que ya
+   descartó el prefetch de tool con evidencia.
+2. **Arranque en frío: 5,9 s en el primer turno tras >600 s de silencio.**
+   2 de 2, sin contraejemplo en 61 turnos. **Causa NO probada:** la sonda al
+   SQL Server actual dio 0,01–0,04 s para abrir la conexión. Por eso se
+   instrumentó en vez de arreglar a ciegas. Con tráfico esporádico esto golpea
+   el primer turno de casi toda conversación.
+3. **`extract-metadata` (7,72 s de media) retiene el único hilo de
+   `cola_envio::_EJECUTOR`.** Hoy no duele con una conversación; con varias en
+   paralelo las partes 2..N de todos esperan detrás. Es la deuda §VI.7 de la
+   biblia.
+4. **El lead y el CRM corren antes de `send_text`** (`_despachar_si_corresponde`
+   con `timeout=15`, `notify` con `timeout=5`). Hoy cuesta 0,74 s p50: es
+   riesgo de cola, no de media. Reclasificado a fiabilidad.
+5. **`send_text` devuelve `False` y los llamadores lo ignoran**: un rechazo de
+   Meta se guarda igual como mensaje `assistant`.
+
+---
+
+## 5. Por qué Cavem no se apagó cuando debía
 
 Queda escrito porque es una lección de proceso, no un olvido técnico.
 

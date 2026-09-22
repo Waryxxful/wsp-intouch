@@ -710,7 +710,43 @@ async def supervisor_node(state: BotState) -> dict:
         # solapar, asi que no hay nada que especular.
         return {"active_agent": deterministic, "_dispatch": deterministic}
 
-    registry = await sync_to_async(build_agent_registry)()
+    # Tercer tramo de la CABEZA (los otros dos estan en
+    # bot/whatsapp/handlers.py::_run_graph): con el bypass de abajo, en el
+    # registro de un solo especialista esta es la UNICA consulta que separa la
+    # llegada del mensaje de la primera llamada al LLM.
+    with get_client().start_as_current_observation(name="resolver-especialista", as_type="span"):
+        registry = await sync_to_async(build_agent_registry)()
+    if len(registry) == 1:
+        # Un solo especialista registrado: la clasificacion no tiene nada que
+        # decidir. `_rutear_con_el_llm` solo puede devolver este mismo slug --
+        # su fallback de output invalido tambien cae aca
+        # (`next(iter(registry))`) y el override de `intencion_compra_real`
+        # exige "ventas" en el registro, que con uno solo no esta.
+        #
+        # Es el registro REAL de InTouch: AGENTS tiene unicamente "comercial"
+        # a proposito (bot/flow/agents/__init__.py, spec §2.2). Medido en
+        # Langfuse sobre 56 turnos del 2026-09-15 con
+        # `manage.py medir_latencia --desde 2026-09-15`: classify-intent
+        # costaba 1,01s de media y 0,70s de mediana, en el 100% de los turnos
+        # -- el 17% de un turno de 5,94s, para elegir entre una opcion.
+        #
+        # Y no era solo tiempo: es una llamada de red mas que puede fallar. El
+        # 403 "prompt injection patterns detected" del 2026-09-02
+        # (docs/PENDIENTES.md #16) tumbaba turnos enteros desde exactamente
+        # esta llamada, y su maximo observado el 09-15 fue 9,06s.
+        #
+        # El atajo se apaga solo: `build_agent_registry` se reconstruye en
+        # cada turno, asi que el primer CustomSpecialist creado desde el panel
+        # deja el registro en dos y devuelve la clasificacion sin que nadie
+        # tenga que acordarse de reactivarla. Eso lo anclan, en par,
+        # GraphSmokeTest::test_un_solo_especialista_registrado_no_llama_al_ruteo
+        # y GraphCustomSpecialistTest::test_supervisor_rutea_a_un_especialista_personalizado.
+        #
+        # Tampoco se especula: `_lanzar_especulacion` existe para solapar la
+        # gen#1 con el ruteo, y sin ruteo no hay nada que solapar.
+        unico = next(iter(registry))
+        return {"active_agent": unico, "_dispatch": unico}
+
     tarea = await _lanzar_especulacion(state, registry)
     cosechada = False
     try:

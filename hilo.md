@@ -227,3 +227,68 @@ notas: un test que no falla ante el defecto que persigue no es un test, y un tes
 no puede borrar ni dejar modificado un archivo trackeado del repo (caso real: los
 tests del `doctor` borraban el fixture del prompt en cada corrida, y como se lee
 en tiempo de import, después no arrancaba ni `manage.py check`).
+
+---
+
+## 2026-09-21 — Latencia: medir primero, y corregir la auditoría del 15-09
+
+El pedido era ejecutar `auditoria latencia/auditoria-latencia-wsp-intouch.md`.
+Lo primero que apareció al medir es que **su premisa era falsa**, así que la
+sesión terminó siendo medición + dos arreglos + la corrección del documento.
+
+### Lo que cambió respecto de lo que creíamos
+
+**El turno es 5,94 s de media y 3,99 s de mediana**, no 7,6 s (n=56 turnos
+reales del 2026-09-15, Langfuse). Los 7,6 s son la media de `extract-metadata`
+(7,72 s), que corre en la cola **después** del envío. Se venía priorizando
+contra un número que medía otra cosa.
+
+Partido en tres tramos: CABEZA (ORM/contexto) 0,05 s p50 · LLM 4,75 s de media ·
+COLA (lead/CRM/POST a Meta) 0,74 s p50. **El turno es LLM.** Eso tira abajo tres
+hallazgos de la auditoría (cola serial, contexto duplicado, trabajo repetido):
+son ciertos en el código y valen ~0 segundos. Y su hallazgo "Alta" sobre el CRM
+antes de WhatsApp es real pero cuesta 0,74 s — riesgo de cola, no de media.
+
+La auditoría además reabría tres experimentos que la biblia §III.2 ya había
+descartado con evidencia (streaming, bajar el razonamiento final, prefetch de
+tool). Corrió desde GitHub en otra máquina, sin acceso a `docs-repo` ni a
+Langfuse; lo dice en sus propios límites. **Sirve de recordatorio: una auditoría
+sin acceso a las mediciones del stack repite lo que ya se pagó.**
+
+### Lo hecho
+
+1. **`manage.py medir_latencia`** — el banco reproducible que pedía la biblia
+   §VI.3 desde hacía tres auditorías. Falta portarlo a `wsp_cavem`.
+2. **Bypass del ruteo con un solo especialista registrado** — `classify-intent`
+   costaba 1,01 s de media en el **100 %** de los turnos para elegir entre una
+   opción. Verificado que no podía devolver otra cosa: el fallback de output
+   inválido y el override de `intencion_compra_real` también terminan en el
+   único slug. Agravante: `_AGENTE_ESPECULADO` sigue siendo `"ventas"`, que no
+   está en el registro, así que el bot pagaba el ruteo **y** perdía la
+   especulación que lo compensa en cavem.
+3. **Instrumentación de la CABEZA** — `preparar-contexto`,
+   `antecedentes-faltantes` y `resolver-especialista`.
+
+### Tres cosas que esta sesión aprendió a los golpes
+
+**No se arregla a ciegas lo que no se pudo reproducir.** Dos turnos mostraron
+5,9 s de CABEZA, y los dos eran los únicos precedidos por más de `CONN_MAX_AGE`
+de silencio — 2 de 2 en 61 turnos. La causa "obvia" era el handshake a SQL
+Server, que este repo ya tenía medido lento e intermitente en
+`config/settings.py`. Pero la sonda contra el servidor actual dio **0,01–0,04 s,
+seis veces seguidas**. La correlación es real; el mecanismo no. Se instrumentó
+en vez de inventar un arreglo.
+
+**Correr la suite con `docker exec` contamina Langfuse de producción.** El
+contenedor tiene las credenciales; el `docker run` documentado en el `CLAUDE.md`
+no. Tres corridas dejaron 48 `run-business-action` de 0,01 s en el proyecto, que
+al mezclarse duplicaban el conteo de tools por turno y casi me hacen reportar
+una regresión inexistente. `medir_latencia` ahora excluye lo que no cuelga de un
+turno y lo informa aparte. **Y el proyecto de Langfuse está compartido con
+cavem:** 6.125 de 6.423 observaciones eran de otro bot.
+
+**Correr la suite con el comando equivocado inventa fallas.** Sin
+`CLIENTE_ACTIVO=renault` aparecen 4 fallas que no existen — los managers
+filtrados por cliente dejan los fixtures invisibles, exactamente lo que
+advierte el `CLAUDE.md` de este repo. Llegué a reportarlas como deuda
+preexistente antes de darme cuenta.

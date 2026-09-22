@@ -460,8 +460,26 @@ def _imagen_enviada_recientemente_sync(conv: Conversation, slug_modelo: str) -> 
 @observe(name="whatsapp-turn", capture_input=False, capture_output=False)
 async def _run_graph(conv: Conversation, text: str, msg_id: str, on_graph_result=None,
                      ya_saludamos: bool = False, envio_inline: bool = False):
-    campaign_hint = await sync_to_async(resolve_campaign_hint)(conv.wa_id)
-    messages = await sync_to_async(build_context_window)(conv)
+    # Spans propios para el tramo previo a la primera llamada al LLM.
+    #
+    # POR QUE: ese tramo era una caja negra. `manage.py medir_latencia` lo
+    # llama CABEZA y sobre 56 turnos del 2026-09-15 dio 0,05s de mediana --
+    # salvo dos turnos de 5,82s y 5,92s, que fueron los dos unicos precedidos
+    # por mas de CONN_MAX_AGE (600s) de silencio. Con el trafico esporadico que
+    # tiene un bot de lead gen, eso golpea el PRIMER turno de casi toda
+    # conversacion, que es el que decide si el contacto sigue.
+    #
+    # La sospecha natural es el handshake a SQL Server, que este repo ya midio
+    # lento e intermitente (config/settings.py, medicion del 2026-09-02:
+    # 0,26-0,57s normal, hasta 35,93s intermitente). Pero el 2026-09-21 una
+    # sonda contra el servidor actual (172.20.21.50) dio 0,02s para abrir la
+    # conexion, seis veces seguidas: el mecanismo NO esta probado. Antes que
+    # arreglar a ciegas lo que no se pudo reproducir, se instrumenta, para que
+    # la proxima vez que ocurra la traza diga cual de las tres llamadas fue.
+    cliente_lf = get_client()
+    with cliente_lf.start_as_current_observation(name="preparar-contexto", as_type="span"):
+        campaign_hint = await sync_to_async(resolve_campaign_hint)(conv.wa_id)
+        messages = await sync_to_async(build_context_window)(conv)
 
     # session_id/user_id = wa_id: agrupa en Langfuse todos los turnos de un
     # mismo contacto bajo la misma sesion, y permite filtrar/buscar trazas
@@ -469,7 +487,7 @@ async def _run_graph(conv: Conversation, text: str, msg_id: str, on_graph_result
     # se separo en propagate_attributes (atributos de correlacion: session_id/
     # user_id/tags) y update_current_span (input/output de la observacion
     # raiz de este @observe) -- ver docs/observability/sdk/upgrade-path.
-    get_client().update_current_span(input={"wa_id": conv.wa_id, "text": text})
+    cliente_lf.update_current_span(input={"wa_id": conv.wa_id, "text": text})
     with propagate_attributes(
         session_id=conv.wa_id, user_id=conv.wa_id,
         tags=[campaign_hint] if campaign_hint else None,
@@ -480,7 +498,8 @@ async def _run_graph(conv: Conversation, text: str, msg_id: str, on_graph_result
         # query ahi levanta SynchronousOnlyOperation (ver
         # bot/flow/agents/_common.py::refrescar_sucursal_unica).
         from bot.flow.agents._common import antecedentes_que_faltan
-        lead_faltante = await sync_to_async(antecedentes_que_faltan, thread_sensitive=True)(conv)
+        with cliente_lf.start_as_current_observation(name="antecedentes-faltantes", as_type="span"):
+            lead_faltante = await sync_to_async(antecedentes_que_faltan, thread_sensitive=True)(conv)
         try:
             result = await graph.ainvoke({
                 "wa_id": conv.wa_id, "text": text, "name": conv.name,

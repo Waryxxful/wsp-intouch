@@ -286,3 +286,35 @@ class SinksTest(SimpleTestCase):
         from bot.business.lead_intouch import SINKS_VALIDOS
 
         self.assertEqual(SINKS_VALIDOS, frozenset({"none", "http"}))
+
+
+class PreferenciaHorariaTest(TestCase):
+    """El documento comercial (§15) pide capturar qué día u horario le acomoda
+    al prospecto, MIENTRAS no exista una agenda integrada -- explícitamente sin
+    comprometer una hora. Hasta ahora no había dónde guardarlo, así que el dato
+    se perdía en la conversación.
+
+    NO entra en ANTECEDENTES_QUE_ABREN_LEAD a propósito: una preferencia de
+    horario no justifica por sí sola abrir un lead, y nunca llega sola.
+    """
+
+    def test_el_extractor_puede_escribir_preferencia_horaria(self):
+        from bot.business.lead_intouch import CAMPOS_ESCRIBIBLES
+        self.assertIn("preferencia_horaria", CAMPOS_ESCRIBIBLES)
+
+    def test_no_abre_un_lead_por_si_sola(self):
+        from bot.business.lead_intouch import ANTECEDENTES_QUE_ABREN_LEAD
+        self.assertNotIn("preferencia_horaria", ANTECEDENTES_QUE_ABREN_LEAD)
+
+    def test_el_esquema_del_extractor_la_declara(self):
+        from bot.flow.extractor_metadatos import LEAD_PROPIEDADES
+        self.assertIn("preferencia_horaria", LEAD_PROPIEDADES)
+
+    def test_se_persiste_en_el_lead(self):
+        from bot.models import Conversation, LeadInTouch
+        conv = Conversation.objects.create(wa_id="56900000001")
+        lead = LeadInTouch.objects.create(
+            conversation=conv, empresa="Empresa Demo",
+            preferencia_horaria="martes por la mañana")
+        lead.refresh_from_db()
+        self.assertEqual(lead.preferencia_horaria, "martes por la mañana")

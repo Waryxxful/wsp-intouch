@@ -22,14 +22,19 @@ class SchemaDelLeadTest(SimpleTestCase):
         campos = set(LEAD_PROPIEDADES) - {"senales"}
         self.assertTrue(campos <= CAMPOS_ESCRIBIBLES, campos - CAMPOS_ESCRIBIBLES)
 
-    def test_estan_los_21_campos_del_contrato(self):
+    def test_estan_los_22_campos_del_contrato(self):
         # El contrato del prompt §8. Si falta uno, el bot lo recoge en la
         # conversación y no llega nunca al equipo comercial.
+        #
+        # `preferencia_horaria` se sumó el 2026-09-10, del §15 del documento
+        # comercial: qué día u horario le acomoda al contacto, MIENTRAS no
+        # exista agenda integrada. No es una hora reservada.
         esperados = {
             "nombre_completo", "correo", "empresa", "industria", "subtipo_automotriz",
             "cargo", "pais_ciudad", "situacion_contact_center", "tipo_contact_center",
             "usa_ia_actualmente", "canales_actuales", "volumen_interacciones",
             "necesidad_principal", "soluciones_interes", "intencion", "plazo_proyecto",
+            "preferencia_horaria",
             "solicita_consultoria", "solicita_contacto_humano",
             "resumen_conversacion", "siguiente_accion_recomendada",
         }

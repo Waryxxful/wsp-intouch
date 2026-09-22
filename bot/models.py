@@ -922,6 +922,15 @@ class SolucionInTouch(models.Model):
         default=False,
         help_text="El prompt exige presentarla como sujeta a evaluación técnica.")
     ejemplos_uso = models.TextField(blank=True, default="")
+    cuando_recomendarla = models.TextField(
+        blank=True, default="",
+        help_text=(
+            "Cuándo conviene ofrecer esta solución, en términos de lo que el "
+            "contacto dice necesitar. Es el mapeo necesidad -> solución del "
+            "documento comercial. Vive acá y no en el prompt porque el prompt "
+            "se manda en CADA turno y esto sólo hace falta cuando el bot habla "
+            "de soluciones -- y porque quien edita el catálogo no deberia tener "
+            "que editar el prompt para cambiar cuándo se recomienda algo."))
     activa = models.BooleanField(default=True)
     orden = models.IntegerField(default=0)
 
@@ -964,7 +973,7 @@ class ModeloOperacion(models.Model):
 
 
 class LeadInTouch(models.Model):
-    """El lead comercial B2B, con los 21 campos del contrato del prompt §8.
+    """El lead comercial B2B, con los 22 campos del contrato del prompt §8.
 
     Uno por conversación (OneToOne) a propósito: el lead se va completando a
     medida que avanza el chat, no se crea uno por turno. Es la primera de las
@@ -1018,6 +1027,13 @@ class LeadInTouch(models.Model):
     necesidad_principal = models.TextField(blank=True, default="")
     soluciones_interes = models.JSONField(default=list, blank=True)
     intencion = models.CharField(max_length=200, blank=True, default="")
+    preferencia_horaria = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text=(
+            "Día u horario que el contacto dijo que le acomoda para que lo "
+            "contacten. NO es una hora agendada: no hay agenda integrada, y el "
+            "prompt prohíbe comprometer una hora. Queda listo para cuando "
+            "exista una agenda real."))
     plazo_proyecto = models.CharField(max_length=120, blank=True, default="")
 
     # Calificación

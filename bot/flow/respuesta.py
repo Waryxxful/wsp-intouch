@@ -141,7 +141,7 @@ async def responder(
         stage: nuevo, descubrimiento, diagnostico, recomendacion, calificacion, siguiente_paso, handoff o cerrado
         modelo_imagen: slug del elemento cuya imagen conviene mandar en este turno, vacío si ninguna
         sucursal_direccion_ids: sólo aplica si compartes direcciones de sedes físicas; si no es tu caso, déjalo vacío
-        lead: antecedentes que el contacto HAYA DICHO, para que el equipo comercial retome el caso: nombre_completo, correo, empresa, industria, cargo, pais_ciudad, situacion_contact_center, tipo_contact_center, usa_ia_actualmente, canales_actuales, volumen_interacciones, necesidad_principal, soluciones_interes, intencion, plazo_proyecto, solicita_consultoria, solicita_contacto_humano, resumen_conversacion, siguiente_accion_recomendada. Nada de deducir ni estimar: un campo vacío se puede preguntar después, uno inventado se le entrega al ejecutivo como si fuera cierto.
+        lead: antecedentes que el contacto HAYA DICHO, para que el equipo comercial retome el caso: nombre_completo, correo, empresa, industria, cargo, pais_ciudad, situacion_contact_center, tipo_contact_center, usa_ia_actualmente, canales_actuales, volumen_interacciones, necesidad_principal, soluciones_interes, intencion, plazo_proyecto, preferencia_horaria, solicita_consultoria, solicita_contacto_humano, resumen_conversacion, siguiente_accion_recomendada. Nada de deducir ni estimar: un campo vacío se puede preguntar después, uno inventado se le entrega al ejecutivo como si fuera cierto.
     """
     # Esta funcion no se ejecuta en el camino normal: `_specialist_node_con_tools`
     # intercepta el tool_call de `responder` y lo trata como la respuesta final,

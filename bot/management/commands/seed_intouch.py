@@ -50,6 +50,10 @@ SOLUCIONES = [
         "modelos_operacion": ["humano", "hibrido", "automatizado"],
         "ejemplos_uso": "Una empresa que hoy atiende por varios canales sin un modelo "
                         "definido y necesita ordenar la operación antes de automatizar.",
+        "cuando_recomendarla": "Cuando el contacto no tiene una operación de atención definida, o la tie"
+                               "ne dispersa entre áreas y canales sin un modelo claro. También cuando qu"
+                               "iere incorporar IA pero primero hay que ordenar el proceso: automatizar "
+                               "sobre un proceso desordenado multiplica el desorden.",
         "orden": 1,
     },
     {
@@ -62,6 +66,10 @@ SOLUCIONES = [
         "modelos_operacion": ["automatizado", "hibrido"],
         "ejemplos_uso": "Atención de consultas frecuentes y toma de datos en WhatsApp, "
                         "con derivación a un agente humano cuando el caso lo requiere.",
+        "cuando_recomendarla": "Cuando menciona alto volumen de interacciones, tiempos de respuesta lent"
+                               "os, atención fuera de horario, o pide explícitamente IA, chatbot o autom"
+                               "atización. También cuando dice que quiere responder más rápido sin agran"
+                               "dar el equipo en la misma proporción.",
         "orden": 2,
     },
     {
@@ -74,6 +82,10 @@ SOLUCIONES = [
         "modelos_operacion": ["humano", "hibrido"],
         "ejemplos_uso": "Una empresa que necesita externalizar total o parcialmente "
                         "su atención, o complementar la operación que ya tiene.",
+        "cuando_recomendarla": "Cuando no tiene Contact Center y necesita uno, o cuando tiene uno extern"
+                               "alizado y quiere evaluar un cambio o un complemento. También cuando el v"
+                               "olumen o la complejidad superan lo que sus áreas internas pueden absorbe"
+                               "r.",
         "orden": 3,
     },
     {
@@ -86,6 +98,10 @@ SOLUCIONES = [
         "modelos_operacion": ["humano", "hibrido", "automatizado"],
         "ejemplos_uso": "Un área que necesita ver la operación en vivo y medir su "
                         "gestión con indicadores propios.",
+        "cuando_recomendarla": "Cuando menciona falta de visibilidad, que no sabe qué pasa en su operaci"
+                               "ón, que no puede medir a su equipo, o que los reportes le llegan tarde o"
+                               " a mano. Palabras que la gatillan: indicadores, KPI, reportería, Power B"
+                               "I, tablero.",
         "orden": 4,
     },
     {
@@ -98,6 +114,9 @@ SOLUCIONES = [
         "modelos_operacion": ["humano", "hibrido", "automatizado"],
         "ejemplos_uso": "Una operación que ya funciona y necesita saber qué está "
                         "pasando dentro de sus conversaciones.",
+        "cuando_recomendarla": "Cuando le preocupa la CALIDAD de lo que se le dice al cliente y no el vo"
+                               "lumen: reclamos, experiencia, cumplimiento de protocolo, discursos dispa"
+                               "rejos entre agentes. También para encuestas, CSAT y NPS.",
         "orden": 5,
     },
     {
@@ -113,7 +132,55 @@ SOLUCIONES = [
         "requiere_evaluacion_tecnica": True,
         "ejemplos_uso": "Registrar automáticamente en el CRM del cliente las "
                         "oportunidades que se generan en la conversación.",
+        "cuando_recomendarla": "Cuando nombra un CRM, un ERP o un sistema propio, o dice que los datos d"
+                               "e la atención quedan sueltos y hay que pasarlos a mano. Preséntala siemp"
+                               "re sujeta a evaluación técnica: sin levantamiento no se sabe qué integra"
+                               "ción es posible.",
         "orden": 6,
+    },
+    {
+        "slug": "saas-whitelabel",
+        "nombre": "Tecnología en modalidad SaaS o Whitelabel",
+        "categoria": "agentes_ia",
+        "descripcion": "La tecnología de agentes conversacionales y automatización "
+                       "entregada como servicio, o bajo la marca del propio cliente, "
+                       "para que la opere su equipo.",
+        "canales": ["whatsapp", "voz", "chat", "correo"],
+        "modelos_operacion": ["automatizado", "hibrido"],
+        # Es la Situación D del documento comercial: un call center o un BPO que
+        # quiere incorporar IA sin dejar de operar él. Sin esta fila, el prompt
+        # ("si una capacidad no aparece ahí, no la ofrezcas") dejaba al bot sin
+        # nada que ofrecerle justo al prospecto que InTouch quiere.
+        "requiere_evaluacion_tecnica": True,
+        "ejemplos_uso": "Un call center que quiere sumar agentes IA a su oferta y "
+                        "presentarlos bajo su propia marca.",
+        "cuando_recomendarla": "Cuando el contacto ES un call center, un BPO o un "
+                               "proveedor de atención, y no un cliente final: ahí no "
+                               "busca externalizar sino incorporar tecnología a lo que "
+                               "ya opera. También cuando una empresa quiere la "
+                               "tecnología pero operarla ella misma.",
+        "orden": 7,
+    },
+    {
+        "slug": "seguridad-compliance",
+        "nombre": "Seguridad y cumplimiento normativo",
+        "categoria": "operacion",
+        "descripcion": "Resguardo de los datos de la operación, trazabilidad de las "
+                       "conversaciones y cumplimiento de las normas que apliquen al "
+                       "negocio del cliente.",
+        "canales": [],
+        "modelos_operacion": ["humano", "hibrido", "automatizado"],
+        # Sujeta a evaluación a propósito: qué normativa aplica depende del rubro
+        # y del país, y el prompt prohíbe afirmar certificaciones.
+        "requiere_evaluacion_tecnica": True,
+        "ejemplos_uso": "Una operación que maneja datos sensibles y necesita saber "
+                        "quién accede a qué y qué queda registrado.",
+        "cuando_recomendarla": "Cuando el contacto es de un rubro regulado -- salud, "
+                               "financiero, seguros, previsión -- o cuando pregunta por "
+                               "seguridad, tratamiento de datos personales, "
+                               "confidencialidad o auditoría. No afirmes certificaciones "
+                               "puntuales: preséntala sujeta a evaluación.",
+        "orden": 8,
     },
 ]
 

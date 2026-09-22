@@ -129,6 +129,10 @@ LEAD_PROPIEDADES = {
     "soluciones_interes": {"type": "array", "items": {"type": "string"}},
     "intencion": {"type": "string"},
     "plazo_proyecto": {"type": "string"},
+    # Día u horario que el contacto dijo preferir. NO es una hora agendada: no
+    # hay agenda integrada y el prompt prohíbe comprometer una. Se guarda para
+    # que el ejecutivo llame cuando al contacto le sirve.
+    "preferencia_horaria": {"type": "string"},
     # Tres estados por lo mismo que `usa_ia_actualmente`, arriba.
     "solicita_consultoria": {"type": "string", "enum": ["si", "no", ""]},
     "solicita_contacto_humano": {"type": "string", "enum": ["si", "no", ""]},

@@ -78,6 +78,7 @@ def _serializar(solucion) -> dict:
         # el modelo tendría que acordarse, y acordarse no es una garantía.
         "requiere_evaluacion_tecnica": solucion.requiere_evaluacion_tecnica,
         "ejemplos_uso": solucion.ejemplos_uso,
+        "cuando_recomendarla": solucion.cuando_recomendarla,
     }
 
 

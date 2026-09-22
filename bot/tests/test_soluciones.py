@@ -87,3 +87,76 @@ class SeedTest(TestCase):
         call_command("seed_intouch", verbosity=0)
         integraciones = SolucionInTouch.objects.get(slug="integraciones")
         self.assertTrue(integraciones.requiere_evaluacion_tecnica)
+
+
+class CuandoRecomendarlaTest(TestCase):
+    """`cuando_recomendarla` traslada al catálogo el mapeo necesidad -> solución
+    del documento comercial (§10), en vez de meterlo en el prompt.
+
+    Va acá y no en el prompt por la misma razón que el resto del catálogo: el
+    prompt se manda en CADA turno, la tool sólo cuando el bot habla de
+    soluciones. Y el que edita el catálogo no debería tener que editar el
+    prompt para cambiar cuándo se recomienda algo.
+    """
+
+    def test_la_tool_expone_cuando_recomendarla(self):
+        from bot.business.soluciones import _listar_soluciones_impl
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="saas-whitelabel",
+            nombre="SaaS y Whitelabel", categoria="agentes_ia",
+            descripcion="Tecnología en modalidad SaaS o marca blanca.",
+            cuando_recomendarla="Cuando el contacto es un call center o BPO.",
+        )
+        resultado = _listar_soluciones_impl()
+        self.assertTrue(resultado["ok"])
+        solucion = next(s for s in resultado["soluciones"] if s["slug"] == "saas-whitelabel")
+        self.assertEqual(solucion["cuando_recomendarla"],
+                         "Cuando el contacto es un call center o BPO.")
+
+    def test_consultar_solucion_tambien_lo_expone(self):
+        from bot.business.soluciones import _consultar_solucion_impl
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="seguridad-compliance",
+            nombre="Seguridad y compliance", categoria="operacion",
+            descripcion="Resguardo de datos y cumplimiento normativo.",
+            cuando_recomendarla="Cuando el contacto es de un rubro regulado.",
+        )
+        resultado = _consultar_solucion_impl("seguridad y compliance")
+        self.assertTrue(resultado["ok"])
+        self.assertIn("regulado", resultado["solucion"]["cuando_recomendarla"])
+
+    def test_el_campo_es_opcional_y_no_rompe_una_solucion_vieja(self):
+        """Las 6 soluciones que ya existían no lo tenían. Si el campo fuera
+        obligatorio, la migración las dejaría inválidas."""
+        from bot.business.soluciones import _listar_soluciones_impl
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO, slug="sin-mapeo",
+            nombre="Solución sin mapeo", categoria="operacion",
+            descripcion="No declara cuándo recomendarla.",
+        )
+        resultado = _listar_soluciones_impl()
+        solucion = next(s for s in resultado["soluciones"] if s["slug"] == "sin-mapeo")
+        self.assertEqual(solucion["cuando_recomendarla"], "")
+
+
+class SemillaCubreElDocumentoTest(TestCase):
+    """El documento comercial (§2) lista capacidades que el prompt prohíbe
+    ofrecer si no están en el catálogo: "si una capacidad no aparece ahí, no la
+    ofrezcas". Dos quedaron sin fila y este test las ancla.
+
+    SaaS/Whitelabel es la Situación D completa del documento (§8): un call
+    center o BPO que escribe es exactamente el prospecto que InTouch quiere, y
+    sin fila el bot no tiene qué ofrecerle.
+    """
+
+    def test_la_semilla_incluye_saas_whitelabel_y_seguridad(self):
+        from bot.management.commands.seed_intouch import SOLUCIONES
+        slugs = {s["slug"] for s in SOLUCIONES}
+        self.assertIn("saas-whitelabel", slugs)
+        self.assertIn("seguridad-compliance", slugs)
+
+    def test_toda_solucion_sembrada_declara_cuando_recomendarla(self):
+        from bot.management.commands.seed_intouch import SOLUCIONES
+        sin_mapeo = [s["slug"] for s in SOLUCIONES if not s.get("cuando_recomendarla")]
+        self.assertEqual(sin_mapeo, [],
+                         f"estas soluciones no dicen cuándo recomendarlas: {sin_mapeo}")

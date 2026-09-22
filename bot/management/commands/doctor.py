@@ -336,9 +336,15 @@ def chequear_dimension_embeddings(opciones):
     distinta dimension no son comparables por coseno, y el schema declara
     vector(1536) porque pgvector no indexa mas de 2000."""
     from bot.rag.indexador import _embeddings_client
-    from bot.rag.tool import _buscar_en_supabase
+    # `_cliente_embeddings` y no `_buscar_en_supabase`: el 2026-09-22 el cliente
+    # se saco a una factory cacheada por proceso, y la declaracion de la
+    # dimension se fue con el. Este chequeo lee el CODIGO FUENTE de la funcion,
+    # asi que un refactor que la mueve lo deja mirando un lugar vacio -- y se
+    # degradaba a AVISO, no a FALLA, o sea que el bot habria seguido pasando el
+    # doctor con la dimension sin verificar. Lo agarro su propio test.
+    from bot.rag.tool import _cliente_embeddings
     indexado = _dimension_declarada_en(_embeddings_client)
-    consulta = _dimension_declarada_en(_buscar_en_supabase)
+    consulta = _dimension_declarada_en(_cliente_embeddings)
     if indexado is None or consulta is None:
         yield Hallazgo(
             AVISO, "no se pudo leer output_dimensionality del codigo",

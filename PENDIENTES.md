@@ -326,14 +326,47 @@ Reparto: CABEZA (ORM/contexto) 0,05 s p50 · LLM 4,75 s de media · COLA
 - **Instrumentación de la CABEZA** — `preparar-contexto`,
   `antecedentes-faltantes` y `resolver-especialista` son spans propios.
 
-### 4.2 Abierto, por tamaño
+### 4.2 El RAG, medido y acelerado — 2026-09-22
 
-1. **La ronda de tool es la masa real.** 19 de 56 turnos la tienen y miden
-   10,08 s de media contra 3,82 s los demás. Una tool cuesta su ejecución
-   **más una generación entera**. La dominante es
-   `consultar_base_conocimiento` (RAG): 11 de 22 llamadas, ~3,3 s de media.
-   Necesita diseño y experimento propio — y ojo con la biblia §III.2, que ya
-   descartó el prefetch de tool con evidencia.
+La consulta al RAG pasó de **2,97 s a ~0,9 s** en estado estable, sin tocar una
+sola decisión de calidad. Eran tres clientes de red reconstruidos en cada
+consulta:
+
+| etapa | antes | después |
+|---|---|---|
+| embedding | 1336 ms | **737 ms** |
+| rerank | 484 ms | **371 ms** |
+| construir los clientes | 220 ms | 0 |
+
+**El detalle que casi me hace shippear un bug:** cachear el cliente *async* a
+nivel proceso revienta, porque `async_to_sync` crea un event loop nuevo en cada
+request — medido, "Event loop is closed" en 2 de 4 requests, intermitente. La
+forma correcta es cliente **síncrono** cacheado, corrido con `asyncio.to_thread`;
+eso además saca las tres llamadas del event loop, que es la otra mitad del
+arreglo (el RPC bloqueaba ~459 ms a todos los contactos del proceso).
+
+**Puerta de calidad:** `manage.py evaluar_rag`, que nunca se había corrido.
+Recall **18/19 antes y después**, relevancia 4,56 → 4,61. Ahora hay línea base
+versionada para el próximo cambio.
+
+El `doctor` atajó el refactor: su chequeo de dimensión del embedding lee el
+código fuente de la función, y al mover el cliente quedó mirando un lugar vacío
+— degradándose a AVISO, no a FALLA. Corregido.
+
+### 4.3 Abierto, por tamaño
+
+1. **La ronda de tool.** 19 de 56 turnos la tienen y miden 10,08 s de media
+   contra 3,82 s los demás. Desglose medido el 2026-09-22: gen#1 (decide la
+   tool) 1,56 s · ejecución 2,41 s · gen#2 (redacta) 2,82 s.
+
+   **Atacada en parte el 2026-09-22 (§4.2):** la consulta al RAG bajó de
+   2,97 s a ~0,9 s. Queda abierto lo estructural — gen#1 no produce texto
+   para el contacto y la tool va entre dos generaciones completas. La salida
+   candidata es lanzar la recuperación en paralelo con gen#1 usando el mensaje
+   crudo; antes de construirla hay que medir con qué frecuencia esa consulta
+   se parece a la que pide gen#1. Ojo con la biblia §III.2: el prefetch se
+   descartó en cavem, aunque por razones que acá no aplican (su gen#1 la
+   dominaba una escritura, y el RAG era 10,9 % contra 50 % acá).
 2. **Arranque en frío: 5,9 s en el primer turno tras >600 s de silencio.**
    2 de 2, sin contraejemplo en 61 turnos. **Causa NO probada:** la sonda al
    SQL Server actual dio 0,01–0,04 s para abrir la conexión. Por eso se

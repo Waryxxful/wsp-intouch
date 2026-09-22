@@ -292,3 +292,60 @@ cavem:** 6.125 de 6.423 observaciones eran de otro bot.
 filtrados por cliente dejan los fixtures invisibles, exactamente lo que
 advierte el `CLAUDE.md` de este repo. Llegué a reportarlas como deuda
 preexistente antes de darme cuenta.
+
+---
+
+## 2026-09-22 — La ronda de tool: el RAG de 2,97 s a ~0,9 s
+
+Desglose de los 19 turnos con tool: gen#1 (decide la tool) 1,56 s · ejecución
+2,41 s · gen#2 (redacta) 2,82 s. La tool dominante es el RAG (50 % de las
+llamadas), y su ejecución era **un span opaco**: hubo que escribir sondas
+descartables para ver qué había adentro.
+
+Adentro había tres clientes de red **reconstruidos en cada consulta**:
+embedding 1336 ms, rerank 484 ms, construcción 220 ms, RPC 460 ms. Casi todo el
+costo del embedding no era calcular el vector: era rehacer el TLS.
+
+### La trampa, que casi shippeo
+
+El arreglo obvio es cachear los clientes. **Con clientes async eso rompe**, y de
+la peor forma: `async_to_sync` (por donde entra el webhook) crea un event loop
+nuevo en cada request, así que un cliente async a nivel proceso queda atado a un
+loop cerrado. Medido: *"Event loop is closed"* en **2 de 4 requests** —
+intermitente, indistinguible de una caída del proveedor.
+
+La forma correcta es **cliente síncrono cacheado por proceso, corrido con
+`asyncio.to_thread`**. Sobrevive a los loops, conserva la conexión, y de paso
+saca las tres llamadas del event loop — el RPC a Supabase bloqueaba ~459 ms a
+todos los contactos que comparten el proceso.
+
+Resultado: la consulta completa pasó de **2969 ms a ~900 ms** en estado estable.
+
+### La puerta de calidad, por primera vez
+
+`bot/rag_eval` tenía 19 preguntas sembradas y **cero resultados**: nunca se
+había corrido. Se corrió antes y después:
+
+| | recall | relevancia |
+|---|---|---|
+| antes | 18/19 | 4,56 |
+| después | **18/19** | **4,61** |
+
+Sin esa línea base el cambio no era decidible, sólo plausible. Ahora hay serie
+de tiempo versionada para el próximo.
+
+### Lo que atajó el doctor
+
+Su chequeo de dimensión del embedding lee el **código fuente** de la función; al
+mover el cliente a una factory quedó mirando un lugar vacío, y se degradaba a
+AVISO en vez de FALLA — o sea que el bot habría seguido pasando el doctor con la
+dimensión sin verificar. Lo agarró su propio test, no el doctor corriendo.
+
+### Lo que NO se hizo, a propósito
+
+Lo estructural de la ronda de tool sigue abierto: gen#1 no produce texto para el
+contacto, y la tool va entre dos generaciones completas. La salida candidata es
+lanzar la recuperación en paralelo con gen#1 usando el mensaje crudo del
+contacto. Antes de construirla hay que medir la tasa de acierto de esa consulta
+contra la que realmente pide gen#1 — que es exactamente la pregunta que hundió
+el prefetch en cavem (36 % de tool errada).

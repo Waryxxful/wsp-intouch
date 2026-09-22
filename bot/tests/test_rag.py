@@ -528,10 +528,10 @@ class IndexarPaginaEnSupabaseTest(TestCase):
 
 class BuscarEnSupabaseTest(TestCase):
     @patch("bot.rag.cliente.get_supabase_client")
-    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
+    @patch("bot.rag.tool._cliente_embeddings")
     def test_k_por_defecto_es_20_y_manda_el_texto_de_la_query(self, mock_embeddings_class, mock_get_client):
         mock_embeddings = MagicMock()
-        mock_embeddings.aembed_query = AsyncMock(return_value=[0.1])
+        mock_embeddings.embed_query = MagicMock(return_value=[0.1])
         mock_embeddings_class.return_value = mock_embeddings
         mock_cliente = MagicMock()
         mock_cliente.rpc.return_value.execute.return_value.data = []
@@ -546,10 +546,10 @@ class BuscarEnSupabaseTest(TestCase):
         )
 
     @patch("bot.rag.cliente.get_supabase_client")
-    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
+    @patch("bot.rag.tool._cliente_embeddings")
     def test_k_explicito_se_respeta(self, mock_embeddings_class, mock_get_client):
         mock_embeddings = MagicMock()
-        mock_embeddings.aembed_query = AsyncMock(return_value=[0.1])
+        mock_embeddings.embed_query = MagicMock(return_value=[0.1])
         mock_embeddings_class.return_value = mock_embeddings
         mock_cliente = MagicMock()
         mock_cliente.rpc.return_value.execute.return_value.data = []
@@ -560,6 +560,88 @@ class BuscarEnSupabaseTest(TestCase):
 
         args, _ = mock_cliente.rpc.call_args
         self.assertEqual(args[1]["match_count"], 5)
+
+
+class ClientesDeProcesoTest(TestCase):
+    """Los clientes del RAG se construyen UNA VEZ por proceso, y sincronos.
+
+    Las dos propiedades se prueban juntas porque una sin la otra es peor que
+    ninguna: cachear un cliente ASYNC es exactamente el bug que esto evita.
+    `async_to_sync` (bot/whatsapp/webhooks.py) crea un event loop nuevo en cada
+    request, asi que un cliente async guardado a nivel proceso queda atado a un
+    loop cerrado -- medido el 2026-09-22: "Event loop is closed" en 2 de 4
+    requests, o sea un fallo INTERMITENTE indistinguible de una caida del
+    proveedor. El cliente sincrono no tiene nada atado a un loop.
+
+    El ahorro que esto persigue, medido contra el servicio real el 2026-09-22:
+    embedding 1336ms -> 737ms, rerank 484ms -> 371ms.
+    """
+
+    def setUp(self):
+        from bot.rag.tool import _cliente_embeddings, _cliente_http
+        _cliente_embeddings.cache_clear()
+        _cliente_http.cache_clear()
+
+    tearDown = setUp
+
+    @patch("langchain_google_genai.GoogleGenerativeAIEmbeddings")
+    def test_el_cliente_de_embeddings_se_construye_una_sola_vez(self, mock_clase):
+        from bot.rag.tool import _cliente_embeddings
+
+        primero = _cliente_embeddings()
+        segundo = _cliente_embeddings()
+
+        self.assertIs(primero, segundo)
+        mock_clase.assert_called_once()
+
+    def test_el_cliente_http_se_construye_una_sola_vez_y_es_sincrono(self):
+        import httpx
+        from bot.rag.tool import _cliente_http
+
+        self.assertIs(_cliente_http(), _cliente_http())
+        # Sincrono, NO httpx.AsyncClient: ver el docstring de la clase.
+        self.assertIsInstance(_cliente_http(), httpx.Client)
+        self.assertNotIsInstance(_cliente_http(), httpx.AsyncClient)
+
+    @patch("bot.rag.cliente.get_supabase_client")
+    @patch("bot.rag.tool._cliente_embeddings")
+    def test_el_trabajo_bloqueante_no_corre_en_el_event_loop(self, mock_emb, mock_get_client):
+        """El embedding y el RPC corren en OTRO thread que el event loop.
+
+        No se afirma "usa asyncio.to_thread" (eso seria probar la
+        implementacion): se comprueba la propiedad que importa, que es que el
+        thread del loop quede libre. Sin esto, cada consulta al RAG congela
+        ~459ms + el embedding a TODOS los contactos que comparten el proceso.
+        """
+        import threading
+
+        hilos = {}
+
+        def _embed(query):
+            hilos["embedding"] = threading.get_ident()
+            return [0.1]
+
+        def _rpc(*args, **kwargs):
+            hilos["rpc"] = threading.get_ident()
+            resultado = MagicMock()
+            resultado.execute.return_value.data = []
+            return resultado
+
+        mock_emb.return_value = MagicMock(embed_query=_embed)
+        mock_get_client.return_value = MagicMock(rpc=_rpc)
+
+        from bot.rag.tool import _buscar_en_supabase
+
+        async def _correr():
+            hilos["loop"] = threading.get_ident()
+            return await _buscar_en_supabase("cómo operan el contact center")
+
+        asyncio.run(_correr())
+
+        self.assertNotEqual(hilos["embedding"], hilos["loop"],
+                            "el embedding corrio en el thread del event loop")
+        self.assertNotEqual(hilos["rpc"], hilos["loop"],
+                            "el RPC a Supabase corrio en el thread del event loop")
 
 
 class ContarIntentosPreviosTest(TestCase):
@@ -676,7 +758,7 @@ class RerankearTest(TestCase):
         mock_resp.raise_for_status = MagicMock()
         mock_post.return_value = mock_resp
 
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_devuelve_los_chunks_en_el_orden_del_rerank_filtrando_por_umbral(self, mock_post):
         from bot.rag.tool import _rerankear
         self._mock_response(mock_post, [
@@ -689,7 +771,7 @@ class RerankearTest(TestCase):
 
         self.assertEqual([c["categoria"] for c in resultado], ["integraciones", "modelos_operacion"])
 
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_manda_el_payload_esperado_a_openrouter(self, mock_post):
         from bot.rag.tool import _rerankear, _RERANK_MODEL
         self._mock_response(mock_post, [])
@@ -703,7 +785,7 @@ class RerankearTest(TestCase):
         self.assertIn("top_n", kwargs["json"])
         self.assertIn("Bearer", kwargs["headers"]["Authorization"])
 
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_todos_bajo_el_umbral_devuelve_lista_vacia(self, mock_post):
         from bot.rag.tool import _rerankear
         self._mock_response(mock_post, [{"index": 0, "relevance_score": 0.01}])
@@ -712,7 +794,7 @@ class RerankearTest(TestCase):
         self.assertEqual(resultado, [])
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_error_http_persistente_cae_a_los_candidatos_del_hibrido(self, mock_post, _sleep):
         """CAMBIO DELIBERADO DE COMPORTAMIENTO (2026-09-07).
 
@@ -733,7 +815,7 @@ class RerankearTest(TestCase):
         resultado = asyncio.run(_rerankear("cualquier pregunta", self._chunks()))
         self.assertEqual(resultado, self._chunks()[:_RERANK_TOP_N])
 
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_respuesta_sin_results_cae_al_fallback_sin_reintentar(self, mock_post):
         """Una respuesta malformada tambien es "el rerank no pudo correr", no
         "nada es relevante", asi que corresponde el fallback -- pero sin gastar
@@ -748,7 +830,7 @@ class RerankearTest(TestCase):
         self.assertEqual(resultado, self._chunks())
         self.assertEqual(mock_post.call_count, 1)
 
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_index_fuera_de_rango_cae_al_fallback_sin_reintentar(self, mock_post):
         from bot.rag.tool import _rerankear
         self._mock_response(mock_post, [{"index": 99, "relevance_score": 0.9}])
@@ -759,7 +841,7 @@ class RerankearTest(TestCase):
 
     def test_lista_de_chunks_vacia_no_llama_a_openrouter(self):
         from bot.rag.tool import _rerankear
-        with patch("httpx.AsyncClient.post", new_callable=AsyncMock) as mock_post:
+        with patch("httpx.Client.post") as mock_post:
             resultado = asyncio.run(_rerankear("pregunta", []))
         self.assertEqual(resultado, [])
         mock_post.assert_not_called()
@@ -980,7 +1062,7 @@ class RerankReintentoTest(TestCase):
         return resp
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_429_se_reintenta_y_el_segundo_intento_sirve(self, mock_post, _sleep):
         from bot.rag.tool import _rerankear
         mock_post.side_effect = [
@@ -994,7 +1076,7 @@ class RerankReintentoTest(TestCase):
         self.assertEqual([c["categoria"] for c in resultado], ["datos_y_seguridad"])
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_4xx_permanente_no_gasta_reintentos(self, mock_post, _sleep):
         """Una key invalida no se arregla reintentando: mismo criterio que
         `_es_error_permanente` en bot/flow/graph.py."""
@@ -1006,7 +1088,7 @@ class RerankReintentoTest(TestCase):
         self.assertEqual(mock_post.call_count, 1)
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_429_persistente_cae_a_los_candidatos_en_vez_de_mentir(self, mock_post, _sleep):
         from bot.rag.tool import _rerankear, _RERANK_MAX_INTENTOS
         mock_post.return_value = self._respuesta_error(429)
@@ -1017,7 +1099,7 @@ class RerankReintentoTest(TestCase):
         self.assertEqual(resultado, self._chunks())
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_el_fallo_queda_registrado_con_su_causa(self, mock_post, _sleep):
         """El defecto que hizo esto invisible: un warning sin `exc_info` ni
         status. Un fallo que no grita se convierte en un dato falso (#27)."""
@@ -1032,7 +1114,7 @@ class RerankReintentoTest(TestCase):
         self.assertIn("HTTPStatusError", registro)
 
     @patch("bot.rag.tool.asyncio.sleep", new_callable=AsyncMock)
-    @patch("httpx.AsyncClient.post", new_callable=AsyncMock)
+    @patch("httpx.Client.post")
     def test_un_rerank_exitoso_sin_relevantes_sigue_devolviendo_vacio(self, mock_post, _sleep):
         """La distincion que el bug borraba: "el rerank dice que nada sirve"
         (vacio, legitimo) contra "el rerank no pudo correr" (fallback). No se

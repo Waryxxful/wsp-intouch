@@ -2,9 +2,11 @@ import asyncio
 import logging
 
 import httpx
+from functools import lru_cache
 from django.conf import settings
 from langchain.tools import ToolRuntime, tool
 from langchain.messages import ToolMessage
+from langfuse import get_client
 
 logger = logging.getLogger(__name__)
 
@@ -58,22 +60,73 @@ def _contar_intentos_previos(tool_messages: list) -> int:
     )
 
 
-async def _buscar_en_supabase(query: str, k: int = 20) -> list[dict]:
-    from bot.rag.cliente import get_supabase_client
+@lru_cache(maxsize=1)
+def _cliente_embeddings():
+    """El cliente de embeddings, construido UNA VEZ por proceso.
+
+    output_dimensionality=1536: debe coincidir con vector(1536) del schema
+    (bot/rag/schema.sql) y con bot/rag/indexador.py::_embeddings_client --
+    embeddings de distinta dimension no son comparables por coseno.
+
+    POR QUE ES SINCRONO Y CACHEADO (medido el 2026-09-22 contra el servicio
+    real, no estimado):
+
+    - Construirlo en cada consulta costaba **1336ms de media** por embedding.
+      Reusandolo baja a **737ms**: 599ms de los que casi todo es rehacer la
+      conexion TLS, no calcular el vector.
+    - **El cliente ASYNC no se puede cachear**, y falla de la peor manera.
+      `async_to_sync` (bot/whatsapp/webhooks.py) crea un event loop NUEVO en
+      cada request, asi que un cliente async guardado a nivel proceso queda
+      atado a un loop ya cerrado: medido, "Event loop is closed" en 2 de 4
+      requests -- INTERMITENTE, que es indistinguible de una caida del
+      proveedor. Un cliente sincrono no tiene nada atado a un loop.
+    - Por eso el llamador lo corre con `asyncio.to_thread`: sincrono, pero
+      fuera del event loop del turno, que ademas es lo que hay que hacer para
+      no bloquear a los otros contactos.
+    """
     from langchain_google_genai import GoogleGenerativeAIEmbeddings
-    # output_dimensionality=1536: debe coincidir con vector(1536) del schema
-    # (bot/rag/schema.sql) y con bot/rag/indexador.py::_embeddings_client --
-    # embeddings de distinta dimension no son comparables por coseno.
-    embeddings = GoogleGenerativeAIEmbeddings(
+
+    return GoogleGenerativeAIEmbeddings(
         model="models/gemini-embedding-2", task_type="RETRIEVAL_QUERY", output_dimensionality=1536,
     )
-    vector = await embeddings.aembed_query(query)
-    cliente = get_supabase_client()
-    resultado = cliente.rpc(
+
+
+@lru_cache(maxsize=1)
+def _cliente_http() -> httpx.Client:
+    """El cliente HTTP del rerank, construido UNA VEZ por proceso.
+
+    Mismo motivo que `_cliente_embeddings`: sincrono para sobrevivir a los
+    loops de `async_to_sync`, y cacheado para conservar la conexion. Medido el
+    2026-09-22: el rerank baja de 484ms a 371ms.
+
+    `httpx.AsyncClient` por consulta era ademas la razon por la que el timeout
+    de 10s no acotaba nada util -- ver el comentario de _RERANK_MAX_INTENTOS.
+    """
+    return httpx.Client(timeout=10.0)
+
+
+def _rpc_busqueda_hibrida(query: str, vector: list, k: int) -> list[dict]:
+    """La llamada bloqueante a Supabase, aislada para correrla en un thread.
+
+    Estaba tal cual dentro de una funcion `async`: el cliente de Supabase es
+    sincrono, asi que `.execute()` bloqueaba el event loop del turno ~459ms de
+    media. Con un solo contacto no se nota; con varios en paralelo, cada RPC
+    congela a todos los demas.
+    """
+    from bot.rag.cliente import get_supabase_client
+
+    return get_supabase_client().rpc(
         "match_documentos",
         {"query_embedding": vector, "query_texto": query, "match_count": k},
-    ).execute()
-    return resultado.data
+    ).execute().data
+
+
+async def _buscar_en_supabase(query: str, k: int = 20) -> list[dict]:
+    lf = get_client()
+    with lf.start_as_current_observation(name="rag-embedding", as_type="span"):
+        vector = await asyncio.to_thread(_cliente_embeddings().embed_query, query)
+    with lf.start_as_current_observation(name="rag-busqueda-hibrida", as_type="span"):
+        return await asyncio.to_thread(_rpc_busqueda_hibrida, query, vector, k)
 
 
 async def _rerankear(query: str, chunks: list[dict]) -> list[dict]:
@@ -85,21 +138,26 @@ async def _rerankear(query: str, chunks: list[dict]) -> list[dict]:
     documents, top_n}, respuesta {"results": [{"index", "relevance_score", ...}]}."""
     if not chunks:
         return []
-    async with httpx.AsyncClient(timeout=10.0) as client:
+
+    def _pedir():
+        """El POST bloqueante, para correrlo fuera del event loop."""
+        resp = _cliente_http().post(
+            "https://openrouter.ai/api/v1/rerank",
+            headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"},
+            json={
+                "model": _RERANK_MODEL,
+                "query": query,
+                "documents": [c["contenido"] for c in chunks],
+                "top_n": min(_RERANK_TOP_N, len(chunks)),
+            },
+        )
+        resp.raise_for_status()
+        return resp.json()["results"]
+
+    with get_client().start_as_current_observation(name="rag-rerank", as_type="span"):
         for intento in range(_RERANK_MAX_INTENTOS):
             try:
-                resp = await client.post(
-                    "https://openrouter.ai/api/v1/rerank",
-                    headers={"Authorization": f"Bearer {settings.OPENROUTER_API_KEY}"},
-                    json={
-                        "model": _RERANK_MODEL,
-                        "query": query,
-                        "documents": [c["contenido"] for c in chunks],
-                        "top_n": min(_RERANK_TOP_N, len(chunks)),
-                    },
-                )
-                resp.raise_for_status()
-                resultados = resp.json()["results"]
+                resultados = await asyncio.to_thread(_pedir)
                 # Una lista vacia ACA es legitima: el rerank corrio y dijo que
                 # nada supera el umbral. Eso NO se puede confundir con el
                 # fallback de abajo, o volvemos al bug que este bloque arregla.

@@ -1,4 +1,5 @@
 import os
+from functools import lru_cache
 
 from django.conf import settings
 from supabase import create_client, Client
@@ -35,7 +36,31 @@ def get_supabase_client(cliente: str | None = None) -> Client:
             "esto escribiria en el proyecto Supabase REAL desde un contexto de test/desarrollo. "
             "Si esto es intencional, seteá SUPABASE_ALLOW_TEST_WRITES=1."
         )
-    supabase = create_client(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"])
     # default "public" fuera de produccion (tests, un dev sin la env var seteada).
     schema = cliente if cliente is not None else os.environ.get("RAG_SCHEMA", "public")
-    return supabase.schema(schema)
+    return _cliente_cacheado(os.environ["SUPABASE_URL"], os.environ["SUPABASE_KEY"], schema)
+
+
+@lru_cache(maxsize=8)
+def _cliente_cacheado(url: str, clave: str, schema: str) -> Client:
+    """El cliente real, construido UNA VEZ por (url, clave, schema).
+
+    Antes se llamaba a `create_client` en cada consulta del RAG: 108ms de
+    media medidos el 2026-09-22, en el camino critico de un turno. No es solo
+    el objeto -- adentro hay un `httpx.Client` con su pool, y rehacerlo tira
+    la conexion TLS ya establecida, que es lo que de verdad se paga.
+
+    La guarda de sqlite queda AFUERA de la cache a proposito: es una defensa
+    (evita escribir en el Supabase real desde un test) y tiene que evaluarse
+    en cada llamada, no una sola vez por proceso.
+
+    Es seguro cachearlo aunque cada request corra en su propio event loop
+    (`async_to_sync` en bot/whatsapp/webhooks.py crea uno nuevo cada vez):
+    este cliente es SINCRONO, asi que no tiene nada atado a un loop. Un
+    cliente async cacheado si rompe, y de la peor forma -- medido el
+    2026-09-22: "Event loop is closed" de forma INTERMITENTE, 2 de 4 requests.
+
+    maxsize=8 y no 1: el pipeline de scraping pide schemas distintos
+    (`cliente="astara"`) en el mismo proceso, y con maxsize=1 cada alternancia
+    reconstruiria el cliente -- justo lo que esto viene a evitar."""
+    return create_client(url, clave).schema(schema)

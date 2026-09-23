@@ -947,6 +947,43 @@ class SolucionInTouch(models.Model):
         return self.nombre
 
 
+class ContactoInstitucional(models.Model):
+    """Teléfono, correo o dirección que la empresa publica en su sitio.
+
+    Sale del scrapeo (bot/scraping/runner.py::_guardar_contactos) y entra a la
+    ficha de cada turno (bot/flow/contexto_turno.py). Va a tabla y no al RAG a
+    propósito: son pocos datos fijos, y en el chat 9 (2026-09-23) el bot dijo
+    tres veces que no tenía el teléfono ni la dirección aunque estaban
+    indexados -- el fragmento del teléfono no llegaba a los candidatos y el de
+    la dirección lo descartaba el rerank. Mismo argumento que SolucionInTouch.
+
+    Cada scrapeo de una fuente reemplaza SUS filas; editarlas a mano no sirve,
+    el próximo scrapeo las pisa. Lo que se corrige es el sitio.
+    """
+
+    TIPO_CHOICES = [("telefono", "Teléfono"), ("correo", "Correo"), ("direccion", "Dirección")]
+
+    cliente = models.CharField(max_length=20, choices=CLIENTE_CHOICES, default="intouch")
+    source = models.ForeignKey(
+        "ScrapingSource", null=True, blank=True, on_delete=models.CASCADE, related_name="contactos")
+    tipo = models.CharField(max_length=10, choices=TIPO_CHOICES)
+    valor = models.CharField(max_length=300)
+    etiqueta = models.CharField(
+        max_length=120, blank=True, default="",
+        help_text="El rótulo con que el sitio lo publica, ej. «Recursos Humanos» o «Chile».")
+    fuente_url = models.URLField(max_length=500)
+    actualizado = models.DateTimeField(auto_now=True)
+
+    objects = _ClienteActivoManager()
+    todos_los_clientes = models.Manager()
+
+    class Meta:
+        ordering = ["tipo", "etiqueta", "valor"]
+
+    def __str__(self):
+        return f"{self.get_tipo_display()}: {self.valor}"
+
+
 class ModeloOperacion(models.Model):
     """Los tres modelos de operación del prompt §2: humano, híbrido y
     automatizado. Conjunto cerrado, y por eso el bot los lee de una tabla en

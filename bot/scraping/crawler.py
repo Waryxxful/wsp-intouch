@@ -252,6 +252,54 @@ def _decodificar_emails_cloudflare(soup: BeautifulSoup) -> None:
             a["href"] = f"mailto:{correo}" if correo else ""
 
 
+def _etiqueta_del_bloque(bloque) -> str:
+    """El rótulo que acompaña a un enlace de contacto dentro de su bloque:
+    los hijos directos que no son enlaces ni los contienen (ej. el
+    «Recursos Humanos» de in-touch.cl). Un enlace metido en una oración
+    ("Llama al 22 123 4567.") no tiene rótulo: queda vacío antes que inventar
+    uno con pedazos de la frase."""
+    partes = []
+    for hijo in bloque.find_all(True, recursive=False):
+        if hijo.name in ("a", "br") or hijo.find("a") is not None:
+            continue
+        texto = hijo.get_text(separator=" ", strip=True)
+        if texto:
+            partes.append(texto)
+    return " · ".join(partes)[:120]
+
+
+def _contactos_de_enlaces(soup: BeautifulSoup) -> list[dict]:
+    """Teléfonos y correos de la página, sacados de los enlaces tel:/mailto:
+    -- determinístico, sin LLM --, en orden de documento y sin repetir.
+    Se llama ANTES de borrar el <footer>: es donde casi todo sitio los publica.
+    Va a estructurados["contactos"] y de ahí a ContactoInstitucional (ver
+    bot/scraping/runner.py::_guardar_contactos)."""
+    contactos = []
+    vistos = set()
+    for a in soup.find_all("a", href=True):
+        href = a["href"].strip()
+        texto = a.get_text(separator=" ", strip=True)
+        if href.lower().startswith("tel:"):
+            numero = href[4:].strip()
+            digitos_texto = sum(ch.isdigit() for ch in texto)
+            valor = texto if digitos_texto >= 7 else numero
+            clave = ("telefono", "".join(ch for ch in valor if ch.isdigit())[-8:])
+            tipo = "telefono"
+        elif href.lower().startswith("mailto:"):
+            valor = href[7:].split("?", 1)[0].strip().lower()
+            clave = ("correo", valor)
+            tipo = "correo"
+        else:
+            continue
+        if not valor or clave in vistos:
+            continue
+        vistos.add(clave)
+        bloque = a.find_parent(("div", "p", "li", "address"))
+        etiqueta = _etiqueta_del_bloque(bloque) if bloque is not None else ""
+        contactos.append({"tipo": tipo, "valor": valor, "etiqueta": etiqueta})
+    return contactos
+
+
 def _contacto_del_pie(soup: BeautifulSoup) -> dict | None:
     """Rescata del <footer> los bloques que traen un enlace tel: o mailto:,
     con la etiqueta que los acompaña (ej. "Recursos Humanos"), antes de que el
@@ -278,9 +326,11 @@ def _extraer_texto_y_enlaces(url: str, html: bytes) -> tuple[str, list[str], lis
     soup = BeautifulSoup(html, "html.parser")
     _decodificar_emails_cloudflare(soup)
     contacto_pie = _contacto_del_pie(soup)
+    contactos = _contactos_de_enlaces(soup)
     for tag in soup(["script", "style", "nav", "footer"]):
         tag.decompose()
     estructurados = extraer_estructurados(soup)
+    estructurados["contactos"] = contactos
     href_ficha_tecnica = _detectar_href_ficha_tecnica(soup)
     if href_ficha_tecnica:
         # Mezclado en el mismo dict "estructurados" ya existente -- no se

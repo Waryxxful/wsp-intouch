@@ -822,6 +822,32 @@ def chequear_whatsapp(opciones):
     )
 
 
+def chequear_contactos_institucionales(opciones):
+    """Teléfono, correo y direcciones del sitio, que van en la ficha de cada
+    turno (ver ContactoInstitucional).
+
+    FALLA sin ninguno: el bot vuelve a responder «no tengo ese dato» cuando le
+    piden cómo contactar a InTouch, que es lo que pasó en el chat 9. Aviso si
+    falta el teléfono o la dirección: con uno solo el bot funciona, pero una
+    pregunta frecuente queda sin respuesta.
+    """
+    from bot.models import ContactoInstitucional
+
+    tipos = set(ContactoInstitucional.objects.values_list("tipo", flat=True))
+    if not tipos:
+        yield Hallazgo(
+            FALLA, "no hay datos de contacto de InTouch",
+            "Scrapear https://in-touch.cl desde el panel (Configuración → Scraping). "
+            "Sin esto el bot no puede dar el teléfono, el correo ni la dirección.",
+        )
+        return
+    total = ContactoInstitucional.objects.count()
+    yield Hallazgo(OK, f"{total} dato(s) de contacto en la ficha")
+    for tipo, nombre in (("telefono", "teléfono"), ("direccion", "dirección")):
+        if tipo not in tipos:
+            yield Hallazgo(AVISO, f"la ficha no tiene {nombre}",
+                           "El sitio no lo publica o el scrapeo no lo encontró.")
+
 SECCIONES = {
     "config": [chequear_variables_obligatorias, chequear_cliente_activo,
                chequear_rag_schema, chequear_schema_efectivo, chequear_langfuse,
@@ -832,7 +858,8 @@ SECCIONES = {
     "prompts": [chequear_prompts_activos, chequear_prompt_contra_fixture,
                 chequear_tools_del_prompt, chequear_tools_del_prompt_global,
                 chequear_vocabulario_del_prompt_armado],
-    "datos": [chequear_catalogo_intouch, chequear_texto_de_consentimiento],
+    "datos": [chequear_catalogo_intouch, chequear_contactos_institucionales,
+              chequear_texto_de_consentimiento],
     "whatsapp": [chequear_whatsapp],
 }
 

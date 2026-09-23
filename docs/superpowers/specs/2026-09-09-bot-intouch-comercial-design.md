@@ -924,6 +924,17 @@ configura una `ScrapingSource` igual, `extract_catalog` levanta
 `NotImplementedError` explícito antes de invocar al LLM (ver
 `bot/tests/test_taxonomia_rag_intouch.py::ExtractCatalogNoImplementadoTest`).
 
+**Actualización 2026-09-23.** El guard sigue, pero el runner ya no llega a él:
+consulta `catalogo_estructurado_disponible()` (`bot/scraping/extractor.py`) y,
+para InTouch, en vez del catálogo automotriz guarda `ContactoInstitucional`:
+teléfonos y correos de los enlaces `tel:`/`mailto:` (determinístico) y
+direcciones leídas por un LLM que el código descarta si no están escritas en
+la página (`bot/scraping/institucional.py`). Van a la ficha de cada turno
+(`bot/flow/contexto_turno.py`) y el `doctor` falla si quedan vacíos. Motivo: en
+el chat 9 el bot no dio el teléfono ni la dirección aunque estaban indexados en
+el RAG — el ranking no los devolvía. El sitio SÍ se scrapea ahora
+(`ScrapingSource` 2, https://in-touch.cl) además de los `.md`.
+
 ---
 
 ## 13. Bloqueantes externos

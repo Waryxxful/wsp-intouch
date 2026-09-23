@@ -1187,11 +1187,12 @@ class RunnerVerticalSinCatalogoTest(TestCase):
     # a extract_catalog, que para este vertical levanta NotImplementedError. El
     # panel mostraba una falla sobre algo que había funcionado.
     @override_settings(CLIENTE_ACTIVO="intouch")
+    @patch("bot.scraping.runner.extraer_direcciones", return_value=[])
     @patch("bot.scraping.runner.indexar_pagina_en_supabase")
     @patch("bot.scraping.runner.extract_catalog")
     @patch("bot.scraping.runner.crawl")
     def test_sin_catalogo_estructurado_el_run_termina_ok_sin_llamar_al_extractor(
-        self, mock_crawl, mock_extract, mock_indexar,
+        self, mock_crawl, mock_extract, mock_indexar, mock_direcciones,
     ):
         mock_crawl.return_value = ([{"url": "https://in-touch.cl/", "texto": "hola"}], [])
         run = run_scrape(ScrapingSource.objects.create(url="https://in-touch.cl/", cliente="intouch"))

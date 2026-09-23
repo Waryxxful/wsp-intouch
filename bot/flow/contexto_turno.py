@@ -44,7 +44,35 @@ def bloque_contexto_turno(state: dict) -> str:
     el RAG: una línea por modelo y la URL, nada de cifras.
     """
     filas, preferencia, texto_legal, soluciones = _leer(state or {})
-    return _armar(filas, preferencia, texto_legal, soluciones)
+    return _armar(filas, preferencia, texto_legal, soluciones, contactos=_leer_contactos())
+
+
+def _leer_contactos() -> list[tuple[str, str, str]]:
+    from bot.models import ContactoInstitucional
+
+    return list(ContactoInstitucional.objects.values_list("tipo", "valor", "etiqueta"))
+
+
+_NOMBRE_TIPO = {"telefono": "Teléfono", "correo": "Correo", "direccion": "Dirección"}
+_ORDEN_TIPO = {"telefono": 0, "correo": 1, "direccion": 2}
+
+
+def _texto_contactos(contactos) -> str:
+    """Los datos de contacto que el sitio publica, con su rótulo. Van en cada
+    turno porque en el chat 9 el RAG los tenía y no los devolvía (ver
+    ContactoInstitucional). El rótulo va pegado al dato: si el único teléfono
+    publicado es el de Recursos Humanos, el bot tiene que poder decirlo."""
+    lineas = []
+    for tipo, valor, etiqueta in sorted(contactos, key=lambda c: (_ORDEN_TIPO.get(c[0], 9), c[2], c[1])):
+        nombre = _NOMBRE_TIPO.get(tipo, tipo)
+        lineas.append(f"- {nombre} ({etiqueta}): {valor}" if etiqueta else f"- {nombre}: {valor}")
+    return (
+        "Datos de contacto publicados en el sitio de InTouch. Dalos tal cual "
+        "cuando los pidan. Si el dato trae un rótulo entre paréntesis, dilo "
+        "junto al dato: por ejemplo, que ese teléfono aparece como el de "
+        "Recursos Humanos. No hay otros: no inventes teléfonos, correos ni "
+        "direcciones.\n" + "\n".join(lineas)
+    )
 
 
 def _leer(state: dict):
@@ -110,8 +138,10 @@ def _texto_ficha(soluciones) -> str:
     )
 
 
-def _armar(filas, preferencia: str, texto_legal: str, soluciones) -> str:
+def _armar(filas, preferencia: str, texto_legal: str, soluciones, contactos=()) -> str:
     partes = [_HECHOS, _texto_horario(filas), _texto_ficha(soluciones)]
+    if contactos:
+        partes.insert(1, _texto_contactos(contactos))
     if preferencia:
         partes.append(
             f'Preferencia ya anotada: "{preferencia}". No la repitas completa. '

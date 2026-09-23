@@ -2,12 +2,16 @@ import logging
 import re
 from datetime import timedelta
 
+from django.db import transaction
 from django.utils import timezone
 
-from bot.models import ScrapedPage, ScrapeRun, ScrapingSource, Servicio, Sucursal, VehiculoCatalogo
+from bot.models import (
+    ContactoInstitucional, ScrapedPage, ScrapeRun, ScrapingSource, Servicio, Sucursal, VehiculoCatalogo,
+)
 
 from .crawler import crawl
 from .extractor import catalogo_estructurado_disponible, extract_catalog, _normalizar_clave
+from .institucional import extraer_direcciones
 from .normalizar import _normalizar_direccion
 from bot.rag.indexador import borrar_chunks_de_paginas_purgadas, indexar_pagina_en_supabase
 
@@ -144,6 +148,8 @@ def execute_scrape(run: ScrapeRun) -> None:
                 fichas_tecnicas=fichas_tecnicas_por_pagina,
                 datos_seminuevos=datos_seminuevos_por_nombre,
             )
+        else:
+            _guardar_contactos(run, paginas, cliente)
         run.estado = "ok"
     except Exception as exc:
         logger.warning("[scraping] run %s fallo: %s", run.pk, exc)
@@ -151,6 +157,48 @@ def execute_scrape(run: ScrapeRun) -> None:
         run.error_detalle = str(exc)
     run.finished_at = timezone.now()
     run.save()
+
+
+def _guardar_contactos(run: ScrapeRun, paginas: list[dict], cliente: str) -> None:
+    """Reemplaza los ContactoInstitucional de la fuente de este run por los
+    que trae el sitio hoy: teléfonos y correos de los enlaces (crawler) más
+    las direcciones que lee el LLM (institucional.py).
+
+    Si el scrapeo no trae ninguno, NO borra los anteriores: un sitio caído a
+    medias o un rediseño que movió el pie dejaría al bot sin teléfono en
+    silencio. Lo avisa en el log y el doctor lo ve si la tabla queda vacía.
+    Si falla la extracción de direcciones, levanta: el run queda en error y
+    los contactos anteriores siguen intactos."""
+    contactos = [
+        {**c, "fuente_url": p["url"]}
+        for p in paginas
+        for c in p.get("estructurados", {}).get("contactos", [])
+    ]
+    try:
+        contactos += extraer_direcciones(paginas)
+    except Exception as exc:
+        raise RuntimeError(f"no se pudieron extraer las direcciones del sitio: {exc}") from exc
+
+    if not contactos:
+        logger.warning(
+            "[scraping] run %s: el sitio no trajo teléfono, correo ni dirección; "
+            "se conservan los contactos anteriores de la fuente", run.pk,
+        )
+        return
+    vistos, filas = set(), []
+    for c in contactos:
+        clave = (c["tipo"], c["valor"].lower())
+        if clave in vistos:
+            continue
+        vistos.add(clave)
+        filas.append(ContactoInstitucional(
+            cliente=cliente, source=run.source, tipo=c["tipo"], valor=c["valor"][:300],
+            etiqueta=(c.get("etiqueta") or "")[:120], fuente_url=c["fuente_url"][:500],
+        ))
+    with transaction.atomic():
+        ContactoInstitucional.todos_los_clientes.filter(cliente=cliente, source=run.source).delete()
+        ContactoInstitucional.todos_los_clientes.bulk_create(filas)
+    logger.info("[scraping] run %s: %d contacto(s) institucional(es) guardado(s)", run.pk, len(filas))
 
 
 def run_scrape(source: ScrapingSource) -> ScrapeRun:

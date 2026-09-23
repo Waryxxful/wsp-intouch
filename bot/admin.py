@@ -3,7 +3,7 @@ from django.contrib import admin
 from .models import (
     Conversation, Message, Setting, Incident, CampaignSend, Servicio, Sucursal, Reserva,
     ScrapingSource, ScrapeRun, ScrapedPage, VehiculoCatalogo, OptOut,
-    EncuestaServicioTecnico, EncuestaVentaAutoNuevo,
+    EncuestaServicioTecnico, EncuestaVentaAutoNuevo, ContactoInstitucional,
 )
 
 
@@ -34,6 +34,21 @@ admin.site.register(Reserva)
 admin.site.register(ScrapingSource, ClienteActivoAdminMixin)
 admin.site.register(ScrapeRun)
 admin.site.register(ScrapedPage)
+
+
+@admin.register(ContactoInstitucional)
+class ContactoInstitucionalAdmin(ClienteActivoAdminMixin):
+    # Solo lectura: el próximo scrapeo pisa cualquier edición a mano. Lo que
+    # se corrige es el sitio.
+    list_display = ("tipo", "valor", "etiqueta", "fuente_url", "actualizado")
+
+    def has_add_permission(self, request):
+        return False
+
+    def has_change_permission(self, request, obj=None):
+        return False
+
+
 admin.site.register(VehiculoCatalogo, ClienteActivoAdminMixin)
 admin.site.register(EncuestaServicioTecnico)
 admin.site.register(EncuestaVentaAutoNuevo)

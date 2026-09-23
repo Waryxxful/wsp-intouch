@@ -165,11 +165,11 @@ async def listar_soluciones(categoria: str = "", canal: str = "") -> dict:
     """Lista las soluciones que InTouch ofrece hoy, con sus canales y los
     modelos de operación en que se pueden entregar.
 
-    Llámala antes de afirmar que InTouch hace algo. Es la única fuente del
-    catálogo: si una capacidad no aparece acá, no la ofrezcas.
-
-    Selecciona después las que sean pertinentes para lo que el cliente
-    necesita; no le enumeres todo el catálogo en cada respuesta.
+    La ficha corta del turno ya trae el nombre y una línea de cada solución
+    activa. No la llames para nombrarlas ni para seguir la conversación.
+    Llámala si necesitas filtrar por canal o por categoría, o si el turno
+    dice que el catálogo no está cargado. Si una capacidad no aparece ni en
+    la ficha ni acá, no la ofrezcas.
 
     Args:
         categoria: opcional -- "operacion", "agentes_ia", "analitica" o
@@ -192,8 +192,8 @@ async def consultar_solucion(referencia: str) -> dict:
     """Devuelve la ficha completa de una solución del catálogo: qué es, en qué
     canales se entrega, con qué modelos de operación y un ejemplo de uso.
 
-    Úsala cuando el cliente pregunte por una solución en particular, o antes de
-    describirla en detalle. Si la ficha dice que requiere evaluación técnica,
+    Úsala cuando pidan el detalle de una solución y la línea de la ficha del
+    turno no alcance. Si la ficha dice que requiere evaluación técnica,
     preséntala como sujeta a evaluación y no como algo ya disponible.
 
     Args:
@@ -208,8 +208,9 @@ async def listar_modelos_operacion() -> dict:
     """Devuelve los modelos de operación de InTouch -- humano, híbrido y
     automatizado -- con la descripción de cada uno y cuándo aplica.
 
-    Úsala cuando el cliente pregunte cómo se entrega el servicio, o cuando
-    tengas que recomendar un enfoque preliminar. Preséntalo siempre como
-    preliminar hasta que un especialista valide alcance y factibilidad.
+    El bloque del turno ya trae una línea de cada modelo. Úsala solo cuando
+    pidan cómo se entrega el servicio más allá de esa línea. Preséntalo
+    siempre como preliminar hasta que un especialista valide alcance y
+    factibilidad.
     """
     return await sync_to_async(_listar_modelos_operacion_impl, thread_sensitive=True)()

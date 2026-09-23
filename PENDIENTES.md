@@ -355,18 +355,28 @@ código fuente de la función, y al mover el cliente quedó mirando un lugar vac
 
 ### 4.3 Abierto, por tamaño
 
-1. **La ronda de tool.** 19 de 56 turnos la tienen y miden 10,08 s de media
-   contra 3,82 s los demás. Desglose medido el 2026-09-22: gen#1 (decide la
-   tool) 1,56 s · ejecución 2,41 s · gen#2 (redacta) 2,82 s.
+1. **La ronda de tool, en el turno de nombrar y preguntar — medida el
+   2026-09-22 por la tarde.** Historia: el 15-09, 19 de 56 turnos con tool
+   medían 10,08 s contra 3,82 s. A la mañana del 22-09 el RAG ya estaba en
+   ~0,9 s (§4.2) y, en la primera prueba, la tool de catálogo medía 0,02 s:
+   el costo era la segunda generación. La salida que se construyó no es el
+   prefetch (biblia §III.2 lo tiene descartado): es la ficha corta, una línea
+   por solución activa dentro del turno, para que nombrar y preguntar no
+   pidan tool. Medido con `medir_latencia`, la misma tarde, entorno
+   `development`: antes de las 18:40 UTC, 7 turnos con tool a **6,32 s** de
+   media; desde las 18:40, 3 turnos sin tool, una generación, **2,90 s** de
+   media (p50 2,81 s, máx 3,13 s). Detalle, cifra y el costo de
+   `reasoning: none` en la biblia §III.1.
 
-   **Atacada en parte el 2026-09-22 (§4.2):** la consulta al RAG bajó de
-   2,97 s a ~0,9 s. Queda abierto lo estructural — gen#1 no produce texto
-   para el contacto y la tool va entre dos generaciones completas. La salida
-   candidata es lanzar la recuperación en paralelo con gen#1 usando el mensaje
-   crudo; antes de construirla hay que medir con qué frecuencia esa consulta
-   se parece a la que pide gen#1. Ojo con la biblia §III.2: el prefetch se
-   descartó en cavem, aunque por razones que acá no aplican (su gen#1 la
-   dominaba una escritura, y el RAG era 10,9 % contra 50 % acá).
+   **Cerrado por ahora el 2026-09-22, al apagar.** No hay implementación
+   pendiente. Tres condiciones, ninguna es una tarea: el turno corto se lee
+   con `reasoning: none` y en la prueba se leyó bien (se reabre solo si
+   aparece voseo, una falta grave o un dato fuera de la ficha; no se agrega
+   una segunda generación); el turno de detalle, filtro o RAG sigue en dos
+   generaciones, ~6,3 s, y es el camino correcto de esa pregunta; el ancho
+   de 78 caracteres se cargó a las 18:57 UTC, después de la muestra de 36, y
+   un vistazo al teléfono es opcional. Cavem no se toca. El relato está en
+   `hilo.md`, cierre del 2026-09-22, y en la biblia §III.1.
 2. **Arranque en frío: 5,9 s en el primer turno tras >600 s de silencio.**
    2 de 2, sin contraejemplo en 61 turnos. **Causa NO probada:** la sonda al
    SQL Server actual dio 0,01–0,04 s para abrir la conexión. Por eso se

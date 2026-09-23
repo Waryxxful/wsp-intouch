@@ -136,4 +136,6 @@ class MensajesLargosTest(SimpleTestCase):
     def test_pide_mensajes_breves(self):
         from bot.flow.global_prompt import SYSTEM_PROMPT
 
-        self.assertIn("párrafo", SYSTEM_PROMPT.lower())
+        self.assertIn("3\nlíneas", SYSTEM_PROMPT)
+        self.assertIn("Como máximo dos mensajes", SYSTEM_PROMPT)
+        self.assertNotIn("contéstalas una por una", SYSTEM_PROMPT)

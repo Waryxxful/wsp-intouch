@@ -43,15 +43,15 @@ def bloque_contexto_turno(state: dict) -> str:
     `build_system_prompt` lo concatena en cada turno del comercial. No pega
     el RAG: una línea por modelo y la URL, nada de cifras.
     """
-    filas, preferencia, texto_legal = _leer(state or {})
-    return _armar(filas, preferencia, texto_legal)
+    filas, preferencia, texto_legal, soluciones = _leer(state or {})
+    return _armar(filas, preferencia, texto_legal, soluciones)
 
 
 def _leer(state: dict):
     from django.conf import settings
 
     from admin_panel.models import BusinessHours
-    from bot.models import LeadInTouch, tiene_consentimiento
+    from bot.models import LeadInTouch, SolucionInTouch, tiene_consentimiento
 
     filas = list(BusinessHours.objects.order_by("dia_semana").values_list(
         "dia_semana", "hora_inicio", "hora_fin", "activo"))
@@ -69,13 +69,49 @@ def _leer(state: dict):
     if not isinstance(texto, str):
         texto = str(texto)
     # Sin wa_id no hay de quién mirar el registro: no se infiere que aceptó.
+    soluciones = list(
+        SolucionInTouch.objects.filter(activa=True)
+        .order_by("orden", "nombre")
+        .values_list("nombre", "descripcion")
+    )
     if texto.strip() and (not wa_id or tiene_consentimiento(wa_id) is not True):
-        return filas, preferencia, texto
-    return filas, preferencia, ""
+        return filas, preferencia, texto, soluciones
+    return filas, preferencia, "", soluciones
 
 
-def _armar(filas, preferencia: str, texto_legal: str) -> str:
-    partes = [_HECHOS, _texto_horario(filas)]
+def _primera_oracion(texto: str) -> str:
+    limpio = " ".join((texto or "").split())
+    corte = limpio.find(". ")
+    if corte != -1:
+        limpio = limpio[:corte + 1]
+    if len(limpio) > 160:
+        limpio = limpio[:157].rstrip() + "…"
+    return limpio
+
+
+def _texto_ficha(soluciones) -> str:
+    if not soluciones:
+        return (
+            "El catálogo de soluciones no está cargado en este turno. "
+            "Antes de afirmar que InTouch ofrece algo, llama a \"listar_soluciones\"."
+        )
+    lineas = "\n".join(
+        f"- {nombre}: {_primera_oracion(descripcion)}".rstrip(": ")
+        for nombre, descripcion in soluciones
+    )
+    return (
+        "Ficha corta del catálogo. Puedes nombrar estas soluciones sin llamar "
+        "a \"listar_soluciones\". Elige una o dos; no enumeres la lista. "
+        "Llama a \"consultar_solucion\" solo si piden el detalle de una y esta "
+        "línea no alcanza. No llames ninguna herramienta para acusar recibo de "
+        "lo que el contacto acaba de contar ni para hacer la siguiente pregunta "
+        "de calificación: eso se responde en este mismo mensaje.\n"
+        + lineas
+    )
+
+
+def _armar(filas, preferencia: str, texto_legal: str, soluciones) -> str:
+    partes = [_HECHOS, _texto_horario(filas), _texto_ficha(soluciones)]
     if preferencia:
         partes.append(
             f'Preferencia ya anotada: "{preferencia}". No la repitas completa. '

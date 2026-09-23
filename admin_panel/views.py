@@ -835,17 +835,24 @@ def _funnel(start, end):
 
 
 def _tiempos_respuesta(convs):
+    """Segundos desde cada mensaje del contacto hasta la primera respuesta.
+
+    No es solo el saludo: cada pregunta cuenta. Si el bot parte la respuesta
+    en dos burbujas, la segunda no abre otro tiempo; la espera es hasta la
+    primera. Dos preguntas seguidas sin respuesta cuentan una sola vez, desde
+    la primera, que es lo que el contacto lleva esperando.
+    """
     tiempos = []
     for conv in convs:
         msgs = sorted(conv.messages.all(), key=lambda m: m.created_at)
-        primer_user = next((m for m in msgs if m.role == "user"), None)
-        if not primer_user:
-            continue
-        primera_respuesta = next(
-            (m for m in msgs if m.role in ("assistant", "human") and m.created_at > primer_user.created_at), None
-        )
-        if primera_respuesta:
-            tiempos.append((primera_respuesta.created_at - primer_user.created_at).total_seconds())
+        esperando_desde = None
+        for mensaje in msgs:
+            if mensaje.role == "user":
+                if esperando_desde is None:
+                    esperando_desde = mensaje.created_at
+            elif mensaje.role in ("assistant", "human") and esperando_desde is not None:
+                tiempos.append((mensaje.created_at - esperando_desde).total_seconds())
+                esperando_desde = None
     return tiempos
 
 

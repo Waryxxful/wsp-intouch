@@ -170,3 +170,43 @@ class BloqueContextoTurnoTest(TestCase):
         self.assertIn("Automatizado", armado)
         self.assertLess(armado.find("## FECHA"), armado.find("https://in-touch.cl"))
         self.assertLess(armado.find("https://in-touch.cl"), armado.find("PROMPT-MARCADOR"))
+
+    def test_sin_catalogo_pide_la_herramienta_antes_de_afirmar(self):
+        from bot.flow.contexto_turno import bloque_contexto_turno
+
+        bloque = bloque_contexto_turno({})
+        self.assertIn("no está cargado", bloque)
+        self.assertIn("listar_soluciones", bloque)
+
+    def test_la_ficha_corta_nombra_la_solucion_sin_pedir_la_herramienta(self):
+        from django.conf import settings
+
+        from bot.flow.contexto_turno import bloque_contexto_turno
+        from bot.models import SolucionInTouch
+
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO,
+            slug="agentes-prueba",
+            nombre="Agentes conversacionales con IA",
+            categoria="agentes_ia",
+            descripcion=(
+                "Agentes que conversan en WhatsApp y voz. "
+                "El resto de la ficha no tiene que viajar en el turno."
+            ),
+            orden=1,
+        )
+        SolucionInTouch.objects.create(
+            cliente=settings.CLIENTE_ACTIVO,
+            slug="apagada",
+            nombre="Solución apagada",
+            categoria="operacion",
+            descripcion="No debe aparecer.",
+            activa=False,
+        )
+        bloque = bloque_contexto_turno({})
+        self.assertIn("sin llamar", bloque)
+        self.assertIn("Agentes conversacionales con IA", bloque)
+        self.assertIn("Agentes que conversan en WhatsApp y voz.", bloque)
+        self.assertNotIn("no tiene que viajar", bloque)
+        self.assertNotIn("Solución apagada", bloque)
+        self.assertNotIn("no está cargado", bloque)

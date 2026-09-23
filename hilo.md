@@ -368,3 +368,118 @@ sin reiniciar el contenedor.
   sale hasta un consentimiento otorgado y la burbuja se manda una vez.
 - No se cargaron las cifras de la home (falta la ficha firmada) ni se tocó
   la ronda de tool. 119 tests de estos módulos, OK.
+
+## 2026-09-22 — Prueba de Tomas: largo, latencia y la ficha corta
+
+Dos conversaciones de prueba, el mismo `wa_id`. Entre una y otra se borró la
+memoria (conversaciones, mensajes y leads). Catálogo y prompts no se tocaron.
+
+### Largo
+
+El prompt pedía párrafos breves y el código partía recién a los 600
+caracteres, así que un catálogo salía en cuatro burbujas. El tope pasó a
+seis líneas de teléfono entre todas las burbujas del turno, y a dos burbujas
+como máximo. La pregunta se conserva; lo que no entra no se manda.
+
+El primer corte era malo: partía en dos apenas pasaba de tres líneas y
+truncaba la frase («la prioridad es que el»). Se dejó de cortar una oración
+a la mitad. Después, en la segunda prueba, un acuse más una pregunta que en
+el teléfono son unas tres líneas igual salían en dos burbujas: el ancho
+estaba en 36 caracteres y las contaba como más de seis. Quedó en 78. Ese par
+(~230 caracteres) es una sola burbuja. Seis líneas, el extremo, llegan a
+unos 470 caracteres.
+
+### Latencia de la primera prueba
+
+`medir_latencia` sobre las trazas de esa conversación, entorno `development`,
+6 turnos, todos con herramienta, modelo `deepseek/deepseek-v4-flash-0731`.
+El «hola» no entra: salió en 1,3 s sin modelo.
+
+| | media |
+|---|---|
+| Turno | 6,33 s (p50 5,81 s, máx 7,84 s) |
+| Elige la herramienta | 1,85 s |
+| La ejecuta | 0,02 s |
+| Redacta | 3,56 s |
+| Envío | 0,72 s |
+
+El ruteador no estaba: con un solo especialista ya se había apagado. La
+herramienta no es el costo. Lo que sobra es la pasada que elige la
+herramienta y no escribe nada.
+
+### La ficha corta
+
+En cada turno entra una línea por solución activa, leída de
+`bot_solucionintouch`. Con eso se puede nombrar qué hace InTouch sin llamar
+a `listar_soluciones`. La herramienta queda para el detalle, para filtrar
+por canal o categoría, y para el fondo (cómo funciona, datos, seguridad).
+Acusar recibo de lo que la persona acaba de contar —el Excel, el rubro, el
+volumen— se responde en la misma pasada.
+
+Si eso se cumple, la media de la primera prueba bajaría a unos 4,5 s. La
+segunda prueba fue corta y la velocidad se sintió bien; no se volvió a
+correr `medir_latencia`, así que el 4,5 s sigue sin medir.
+
+### Medido después, la misma tarde
+
+`medir_latencia` partido a las 18:40 UTC, entorno `development`. Antes: 7
+turnos con tool, media 6,32 s, y la tool en 0,02 s. Desde las 18:40: 3
+turnos, ninguno con tool, una generación, media 2,90 s (p50 2,81 s, máx
+3,13 s). La generación que escribe midió 2,14 s. El 4,5 s restaba la pasada
+de selección y dejaba la redacción; sin tool el grafo no corre esa
+redacción. Quedó en la biblia §III.1.
+
+Esos tres turnos salieron con el ancho en 36. El 78 quedó cargado a las
+18:57, después. n=3, sin control de llamada mínima y sin juez.
+
+Prompt republicado y gunicorn recargado con HUP. El doctor sigue en FALLA
+mientras `TEXTO_CONSENTIMIENTO` esté vacío y `LEAD_SINK` no sea `none`.
+
+### Lead y panel
+
+El lead de la primera prueba quedó en `intouch.bot_leadintouch` (fila 6,
+Tomas, WARM). El CRM lo rechazó tres veces con 400: `despachado_en` vacío.
+El bot no lo había derivado: había preguntado si le acomodaba un especialista
+y la conversación se cortó sin un sí.
+
+En el dashboard, «Respuesta» estaba en minutos, así que 6 segundos se veían
+como 0. Ahora dice «Promedio por mensaje» y el valor va en segundos. Cuenta
+cada pregunta hasta la primera burbuja. El bundle está en
+`staticfiles/mf/wsp_intouch/`.
+
+### Commits
+
+`c8e637d` y `2a6a3d0`, autor Tomas Valenzuela. El push a
+`Waryxxful/wsp-intouch` respondió 403. Lo de después —el largo, la ficha
+corta y la tarjeta del panel— no está commiteado.
+
+### Cierre al apagar — 2026-09-22
+
+Quedó listo por ahora. No hay tarea abierta con la latencia ni con el largo.
+Los tres límites que se conversaron son condiciones, no trabajo pendiente:
+
+1. **Razonamiento apagado en el turno corto.** El contacto lee la primera
+   llamada. En la prueba se leyó bien. Se mira de nuevo solo si en una
+   conversación real aparece voseo, una falta grave o un dato que no está en
+   la ficha. No se agrega una segunda generación para cuidar la prosa: eso
+   devuelve los ~6 s.
+2. **Turno de detalle, filtro o RAG.** Sigue en unas dos generaciones, ~6,3 s,
+   y cerca de 7 s si la consulta es el RAG. Es el camino correcto de esa
+   pregunta. No se diseña otra cosa mientras nombrar y preguntar sea lo
+   frecuente.
+3. **Ancho 78 y Cavem.** Falta, si se quiere, un vistazo al teléfono: un acuse
+   más una pregunta, de unas tres líneas, tiene que llegar en una sola
+   burbuja. Cavem no se toca. La ficha no se le copia: allá la herramienta
+   manda el pin, el PDF o la foto. El corte de seis líneas solo se porta si
+   en Cavem las respuestas también se van largas.
+
+Dónde quedó escrito:
+
+- Biblia, `/home/admincrm/docs-repo/biblia_bots.md` §II.1, §III.1, ley 4 y
+  §III.6. Ahí están las cifras y el contrato del corte.
+- `PENDIENTES.md` §4.3 punto 1, marcado como cerrado por ahora.
+- `auditoria latencia/estado-actual-wsp-intouch.md`, el corte y la ficha.
+
+Nada de esta sesión está commiteado. En disco sí: sobrevive al apagado. El
+código que corre es el del working tree (ficha en `bot/flow/contexto_turno.py`,
+corte en `bot/whatsapp/handlers.py`, workers recargados a las 18:57 UTC).

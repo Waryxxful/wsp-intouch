@@ -380,8 +380,8 @@ export function DashboardPage({ basename }: { basename: string }) {
           <StatsCard
             icon="feather-clock"
             iconBg="bg-soft-info text-info"
-            value={data.kpis.tiempo_respuesta_promedio_seg !== null ? `${Math.round(data.kpis.tiempo_respuesta_promedio_seg / 60)} min` : '—'}
-            label="Respuesta"
+            value={data.kpis.tiempo_respuesta_promedio_seg !== null ? `${data.kpis.tiempo_respuesta_promedio_seg} s` : '—'}
+            label="Promedio por mensaje"
           />
         </div>
         <div className="col-md-3 col-sm-6">

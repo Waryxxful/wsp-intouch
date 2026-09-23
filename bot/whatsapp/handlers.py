@@ -331,43 +331,111 @@ def _a_formato_whatsapp(texto: str) -> str:
     return re.sub(r"\*\*(.+?)\*\*", r"*\1*", texto)
 
 
-# Largo (en caracteres) a partir del cual un mensaje se considera "muy
-# largo" para WhatsApp -- criterio subjetivo (no es un limite tecnico de la
-# API) elegido para que las respuestas se vean como una conversacion real,
-# no un bloque de texto. Ver _dividir_en_mensajes.
-_LARGO_MAXIMO_MENSAJE = 600
+# Ancho de una línea de la burbuja en el teléfono, en caracteres. No es un
+# límite de la API. 36 contaba como dos mensajes el par del 22-09
+# («Entendido, Tomas…» + la pregunta de interacciones), que en el teléfono
+# son unas 3 líneas y tienen que salir en una sola burbuja. Con 78, ese par
+# son 3 líneas y seis líneas —el extremo— llegan a ~470 caracteres.
+_CHARS_POR_LINEA = 78
+_LINEAS_MAXIMAS_TURNO = 6
+_MENSAJES_MAXIMOS = 2
+
+
+def _lineas_visuales(texto: str) -> int:
+    """Cuántas líneas ocupa `texto` en el teléfono, contando el salto de línea
+    y el corte automático al llegar a `_CHARS_POR_LINEA`."""
+    total = 0
+    for linea in texto.split("\n"):
+        largo = len(linea.strip())
+        if largo == 0:
+            continue
+        total += max(1, (largo + _CHARS_POR_LINEA - 1) // _CHARS_POR_LINEA)
+    return total
+
+
+def _unidades_de_respuesta(texto: str) -> list[str]:
+    """Oraciones, y cada ítem de una lista como unidad propia.
+
+    Un catálogo escrito con guiones en el mismo párrafo es una sola unidad
+    si no se parte: ahí el teléfono muestra una pared de texto.
+    """
+    unidades = []
+    for parrafo in re.split(r"\n\s*\n", texto):
+        parrafo = parrafo.strip()
+        if not parrafo:
+            continue
+        lineas = [linea.strip() for linea in parrafo.split("\n") if linea.strip()]
+        if len(lineas) > 1 and any(linea[:1] in "-•*" for linea in lineas):
+            buffer = []
+            for linea in lineas:
+                if linea[:1] in "-•*" and buffer:
+                    unidades.append(" ".join(buffer))
+                    buffer = [linea]
+                else:
+                    buffer.append(linea)
+            if buffer:
+                unidades.append(" ".join(buffer))
+            continue
+        for oracion in re.split(r"(?<=[.!?])\s+", parrafo.replace("\n", " ")):
+            oracion = oracion.strip()
+            if oracion:
+                unidades.append(oracion)
+    return unidades
+
+
+def _empaquetar_sin_cortar(unidades: list[str]) -> str:
+    """Une oraciones enteras hasta 6 líneas. Una oración que no cabe se deja
+    afuera; no se parte en «es que el»."""
+    if not unidades:
+        return ""
+    if _lineas_visuales(unidades[0]) > _LINEAS_MAXIMAS_TURNO:
+        return unidades[0]
+    elegidas = []
+    for unidad in unidades:
+        prueba = " ".join(elegidas + [unidad])
+        if _lineas_visuales(prueba) <= _LINEAS_MAXIMAS_TURNO:
+            elegidas.append(unidad)
+        else:
+            break
+    return " ".join(elegidas)
 
 
 def _dividir_en_mensajes(texto: str) -> list[str]:
-    """Divide `texto` en varios mensajes de WhatsApp en vez de mandar todo
-    como un solo bloque -- feedback real del usuario (wsp_demo,
-    renault.cl): el bot mandaba respuestas de 3-4 parrafos como un unico
-    mensaje, muy largo comparado a como escribe una persona real por
-    WhatsApp. Primero divide por parrafo (linea en blanco, "\\n\\n") -- el
-    LLM ya separa sus ideas asi (ver seccion "LARGO DE LOS MENSAJES" del
-    prompt global). Si un parrafo por si solo sigue siendo mas largo que
-    _LARGO_MAXIMO_MENSAJE, lo subdivide por oraciones completas (nunca a
-    mitad de una), agrupando oraciones consecutivas hasta llenar el
-    limite. Si una sola oracion ya excede el limite, se manda entera
-    igual -- nunca se corta una oracion a la mitad."""
-    parrafos = [p.strip() for p in texto.split("\n\n") if p.strip()]
-    mensajes = []
-    for parrafo in parrafos:
-        if len(parrafo) <= _LARGO_MAXIMO_MENSAJE:
-            mensajes.append(parrafo)
-            continue
-        oraciones = re.split(r"(?<=[.!?])\s+", parrafo)
-        actual = ""
-        for oracion in oraciones:
-            candidato = f"{actual} {oracion}".strip() if actual else oracion
-            if actual and len(candidato) > _LARGO_MAXIMO_MENSAJE:
-                mensajes.append(actual)
-                actual = oracion
-            else:
-                actual = candidato
-        if actual:
-            mensajes.append(actual)
-    return mensajes or [texto]
+    """Una burbuja si el texto cabe en 6 líneas. Dos solo si la pregunta no
+    entra en esa misma burbuja. Nunca se corta una oración a la mitad, y no
+    hay tercera burbuja: lo que no entra, no se manda.
+    """
+    crudo = texto.strip()
+    if not crudo:
+        return [texto]
+    unidades = _unidades_de_respuesta(crudo)
+    if not unidades:
+        return [crudo]
+
+    indice_pregunta = next(
+        (i for i in range(len(unidades) - 1, -1, -1) if unidades[i].rstrip().endswith("?")),
+        None,
+    )
+    if indice_pregunta is None:
+        return [_empaquetar_sin_cortar(unidades)]
+
+    pregunta = unidades[indice_pregunta]
+    cuerpo = unidades[:indice_pregunta]
+    caben = []
+    for unidad in cuerpo:
+        prueba = " ".join(caben + [unidad, pregunta])
+        if _lineas_visuales(prueba) <= _LINEAS_MAXIMAS_TURNO:
+            caben.append(unidad)
+        else:
+            break
+    if caben or not cuerpo:
+        junto = " ".join(caben + [pregunta]).strip()
+        if junto and _lineas_visuales(junto) <= _LINEAS_MAXIMAS_TURNO:
+            return [junto]
+    cuerpo_texto = _empaquetar_sin_cortar(cuerpo)
+    if not cuerpo_texto:
+        return [pregunta]
+    return [cuerpo_texto, pregunta][:_MENSAJES_MAXIMOS]
 
 
 async def _get_or_create_conversation(wa_id: str, name: str) -> tuple[Conversation, bool]:

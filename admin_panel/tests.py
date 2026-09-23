@@ -624,6 +624,25 @@ class DashboardEndpointsTest(TestCase):
         kpis = resp.json()["kpis"]
         self.assertEqual(kpis["tiempo_respuesta_promedio_seg"], 120)
         self.assertEqual(kpis["tiempo_respuesta_p50_seg"], 120)
+
+    def test_el_promedio_cuenta_cada_pregunta_no_solo_la_primera(self):
+        conv = Conversation.objects.create(wa_id="56922224444")
+        Conversation.objects.filter(pk=conv.pk).update(created_at="2026-01-05T12:00:00Z")
+        pares = [
+            ("user", "2026-01-05T12:00:00Z", "hola"),
+            ("assistant", "2026-01-05T12:00:10Z", "hola"),
+            ("assistant", "2026-01-05T12:00:11Z", "segunda burbuja"),
+            ("user", "2026-01-05T12:01:00Z", "precio"),
+            ("assistant", "2026-01-05T12:01:30Z", "depende"),
+        ]
+        for role, cuando, texto in pares:
+            mensaje = Message.objects.create(conversation=conv, role=role, content=texto)
+            Message.objects.filter(pk=mensaje.pk).update(created_at=cuando)
+
+        resp = self.client.get("/demo/api/admin/dashboard?range=custom&from=2026-01-01&to=2026-01-10")
+        kpis = resp.json()["kpis"]
+        self.assertEqual(kpis["tiempo_respuesta_promedio_seg"], 20)
+        self.assertEqual(kpis["tiempo_respuesta_p50_seg"], 20)
         self.assertEqual(kpis["pct_respondidas"], 1.0)
         self.assertEqual(kpis["pct_agendada"], 0.0)
         self.assertEqual(kpis["templates_enviados"], 0)

@@ -184,13 +184,19 @@ class SaltosEscapadosTest(TestCase):
         self.assertEqual(_a_formato_whatsapp("a\\rb"), "a\nb")
 
     def test_devuelve_el_partido_en_varios_mensajes(self):
-        # Efecto lateral del bug: _dividir_en_mensajes corta por linea en
-        # blanco REAL, asi que con "\\n" literal el turno llegaba como un
-        # unico mensaje largo mientras el resto llegaban en 3-4.
-        from bot.whatsapp.handlers import _a_formato_whatsapp, _dividir_en_mensajes
+        # Con "\\n" literal el salto no es real y el texto sigue siendo una
+        # sola unidad. Al convertir el escape, las opciones quedan en líneas
+        # de verdad, pero siguen cabiendo en el tope de 6 líneas: no se
+        # disparan en tres burbujas.
+        from bot.whatsapp.handlers import (
+            _LINEAS_MAXIMAS_TURNO, _a_formato_whatsapp, _dividir_en_mensajes,
+            _lineas_visuales,
+        )
         crudo = "Opciones:\\n\\n*1. Subaru* $19.890.000\\n\\n*2. Tucson* $19.990.000"
         self.assertEqual(len(_dividir_en_mensajes(crudo)), 1)
-        self.assertGreater(len(_dividir_en_mensajes(_a_formato_whatsapp(crudo))), 1)
+        partes = _dividir_en_mensajes(_a_formato_whatsapp(crudo))
+        self.assertLessEqual(len(partes), 2)
+        self.assertLessEqual(sum(_lineas_visuales(p) for p in partes), _LINEAS_MAXIMAS_TURNO)
 
     def test_no_toca_un_salto_de_linea_real(self):
         from bot.whatsapp.handlers import _a_formato_whatsapp
@@ -255,41 +261,71 @@ class AFormatoWhatsappTest(TestCase):
 
 class DividirEnMensajesTest(TestCase):
     def test_texto_corto_no_se_divide(self):
-        # Feedback real del usuario (wsp_demo, renault.cl): el bot mandaba
-        # bloques de 3-4 parrafos como un solo mensaje de WhatsApp -- muy
-        # largo comparado a como escribe una persona real por WhatsApp.
         texto = "Hola, ¿en qué le puedo ayudar?"
         self.assertEqual(_dividir_en_mensajes(texto), [texto])
 
-    def test_parrafos_separados_por_linea_en_blanco_se_dividen_en_mensajes_distintos(self):
+    def test_dos_frases_cortas_siguen_en_un_solo_mensaje(self):
+        # Una línea en blanco ya no abre otra burbuja. Si cabe en seis
+        # líneas, sale junto.
         texto = "Primer párrafo, corto.\n\nSegundo párrafo, también corto."
-        self.assertEqual(
-            _dividir_en_mensajes(texto),
-            ["Primer párrafo, corto.", "Segundo párrafo, también corto."],
+        self.assertEqual(len(_dividir_en_mensajes(texto)), 1)
+
+    def test_el_acuse_y_la_pregunta_de_tres_lineas_van_en_un_mensaje(self):
+        # Prueba del 22-09: el corte a 36 caracteres lo partió en dos burbujas
+        # y en el teléfono se lee como unas tres líneas.
+        texto = (
+            "Entendido, Tomas: la velocidad de respuesta es clave y perder "
+            "leads por demoras es un dolor real. "
+            "Para dimensionar la propuesta: ¿más o menos cuántas interacciones "
+            "al día reciben y por qué canal les llega el grueso de los leads?"
         )
+        partes = _dividir_en_mensajes(texto)
+        self.assertEqual(len(partes), 1)
+        self.assertIn("dolor real.", partes[0])
+        self.assertIn("grueso de los leads?", partes[0])
+
+    def test_una_pregunta_corta_no_abre_segunda_burbuja(self):
+        texto = (
+            "¡Qué bien, Tomas!\n\n"
+            "Para recomendarte un enfoque, cuéntame: ¿hoy ya tienes Contact Center propio?"
+        )
+        partes = _dividir_en_mensajes(texto)
+        self.assertEqual(len(partes), 1)
+        self.assertIn("Contact Center propio?", partes[0])
+
+    def test_no_corta_una_frase_a_la_mitad(self):
+        frase = (
+            "Entiendo, Tomas: hoy tienen un Contact Center propio, están viendo "
+            "externalizarlo y la prioridad es que el registro deje de ser manual."
+        )
+        pregunta = (
+            "¿Cómo trabajan los leads hoy, los tienen cargados en un CRM o sistema propio?"
+        )
+        partes = _dividir_en_mensajes(f"{frase} {pregunta}")
+        self.assertIn("deje de ser manual.", " ".join(partes))
+        for parte in partes:
+            self.assertTrue(parte.rstrip()[-1] in ".?")
 
     def test_parrafos_vacios_por_saltos_de_linea_extra_se_descartan(self):
         texto = "Primero.\n\n\n\nSegundo."
-        self.assertEqual(_dividir_en_mensajes(texto), ["Primero.", "Segundo."])
+        self.assertEqual(_dividir_en_mensajes(texto), ["Primero. Segundo."])
 
-    def test_parrafo_unico_muy_largo_se_divide_por_oraciones_sin_pasar_el_limite(self):
-        # Reproduce el caso real: un parrafo unico de varias oraciones,
-        # mas largo que _LARGO_MAXIMO_MENSAJE, sin ningun "\n\n" -- se
-        # divide por oraciones completas (nunca a mitad de una), cada
-        # mensaje resultante dentro del limite.
-        oracion = "Esta es una oracion de relleno para hacer el parrafo bastante largo."
-        texto = " ".join([oracion] * 10)
+    def test_un_catalogo_largo_no_pasa_de_dos_mensajes_ni_de_seis_lineas(self):
+        intro = "Hola, te cuento lo que hacemos en InTouch."
+        servicio = "Operación de Contact Center con agentes, voz, WhatsApp y correo."
+        texto = " ".join([intro, *([servicio] * 8)]) + " ¿Por qué canal atienden hoy?"
+        from bot.whatsapp.handlers import _LINEAS_MAXIMAS_TURNO, _lineas_visuales
         partes = _dividir_en_mensajes(texto)
-        self.assertGreater(len(partes), 1)
-        for parte in partes:
-            self.assertLessEqual(len(parte), 600)
-        # ninguna oracion se corto a la mitad
-        self.assertEqual(" ".join(partes), texto)
+        self.assertLessEqual(len(partes), 2)
+        self.assertLessEqual(sum(_lineas_visuales(p) for p in partes), _LINEAS_MAXIMAS_TURNO)
+        self.assertTrue(partes[-1].rstrip().endswith("?"))
+        self.assertNotIn(servicio * 2, " ".join(partes))
 
-    def test_no_divide_una_oracion_a_la_mitad_aunque_una_sola_exceda_el_limite(self):
+    def test_una_oracion_mas_larga_que_seis_lineas_sale_entera(self):
+        # Cortarla a mitad deja una frase que no se entiende. Sale entera,
+        # aunque pase el tope de líneas.
         oracion_larga = "x" * 800 + "."
-        partes = _dividir_en_mensajes(oracion_larga)
-        self.assertEqual(partes, [oracion_larga])
+        self.assertEqual(_dividir_en_mensajes(oracion_larga), [oracion_larga])
 
 
 class RunGraphModeloImagenTest(TestCase):
@@ -433,29 +469,28 @@ class RunGraphModeloImagenTest(TestCase):
         mensaje_guardado = conv.messages.filter(role="assistant").first()
         self.assertEqual(mensaje_guardado.content, "El *Koleos* parte desde *$27.990.000*")
 
-    def test_response_text_con_varios_parrafos_se_manda_en_varios_send_text(self):
-        # Feedback real del usuario (wsp_demo, renault.cl): el bot mandaba
-        # respuestas de 3-4 parrafos como un solo mensaje de WhatsApp --
-        # se dividen en un send_text por parrafo, cada uno guardado como
-        # su propio Message (asi el historial refleja lo que en verdad se
-        # mando, mensaje por mensaje).
+    def test_varios_parrafos_cortos_van_en_una_sola_burbuja(self):
+        # Antes (herencia de wsp_demo) cada párrafo salía en su propio
+        # send_text. Desde el 2026-09-22 la regla es otra: una sola burbuja si
+        # la respuesta cabe en _LINEAS_MAXIMAS_TURNO, y nunca una tercera (ver
+        # _dividir_en_mensajes). Tres párrafos de una línea caben en una, y se
+        # empaquetan como oraciones unidas por espacio (_empaquetar_sin_cortar).
         conv = Conversation.objects.create(wa_id="56911112222")
+        texto = "Primer párrafo.\n\nSegundo párrafo.\n\nTercer párrafo."
+        enviado = "Primer párrafo. Segundo párrafo. Tercer párrafo."
         self._set_graph_result({
             "active_agent": "ventas", "flow_state": "IDLE", "flow_data": {},
-            "response_text": "Primer párrafo.\n\nSegundo párrafo.\n\nTercer párrafo.",
+            "response_text": texto,
             "modelo_imagen": None,
         })
         async_to_sync(_run_graph)(conv, "cuéntame más", "wamid.15", envio_inline=True)
 
-        self.assertEqual(self.mock_wa.return_value.send_text.call_count, 3)
-        llamadas = [c.args[1] for c in self.mock_wa.return_value.send_text.call_args_list]
-        self.assertEqual(llamadas, ["Primer párrafo.", "Segundo párrafo.", "Tercer párrafo."])
-        # solo el primer mensaje va como reply_to del mensaje original
-        primer_llamada = self.mock_wa.return_value.send_text.call_args_list[0]
-        self.assertEqual(primer_llamada.kwargs.get("reply_to"), "wamid.15")
-        mensajes_guardados = list(conv.messages.filter(role="assistant").order_by("id").values_list("content", flat=True))
-        self.assertEqual(mensajes_guardados, ["Primer párrafo.", "Segundo párrafo.", "Tercer párrafo."])
-
+        self.assertEqual(self.mock_wa.return_value.send_text.call_count, 1)
+        llamada = self.mock_wa.return_value.send_text.call_args_list[0]
+        self.assertEqual(llamada.args[1], enviado)
+        self.assertEqual(llamada.kwargs.get("reply_to"), "wamid.15")
+        mensajes_guardados = list(conv.messages.filter(role="assistant").values_list("content", flat=True))
+        self.assertEqual(mensajes_guardados, [enviado])
 
 class RunGraphRecursionErrorTest(TestCase):
     def setUp(self):

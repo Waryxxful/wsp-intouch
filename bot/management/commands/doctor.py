@@ -221,14 +221,53 @@ def chequear_langfuse(opciones):
             "pero se pierde la unica via de auditar latencia y calidad sobre turnos reales.",
         )
         return
-    base = os.environ.get("LANGFUSE_BASE_URL", "")
-    if "us.cloud.langfuse.com" not in base:
+    base = _host_langfuse()
+    if not base:
         yield Hallazgo(
-            AVISO, f"LANGFUSE_BASE_URL = {base or '(default EU)'}",
-            "el proyecto vive en la region US; con el default europeo las trazas dan 401.",
+            AVISO, "LANGFUSE_BASE_URL sin setear",
+            "el SDK cae al default europeo (cloud.langfuse.com), que es otro deployment: "
+            "con llaves de otro host las trazas dan 401.",
         )
     else:
-        yield Hallazgo(OK, "Langfuse configurado (region US)")
+        yield Hallazgo(OK, f"Langfuse configurado ({base})")
+
+
+def _host_langfuse():
+    # El SDK acepta cualquiera de las dos; los repos usan LANGFUSE_BASE_URL.
+    return os.environ.get("LANGFUSE_BASE_URL") or os.environ.get("LANGFUSE_HOST") or ""
+
+
+def chequear_credenciales_langfuse(opciones):
+    """Prueba el par de llaves contra el host configurado en vez de comparar el
+    host con uno fijo: el host cambió una vez (US cloud -> self-hosted) y el
+    chequeo viejo quedó avisando en falso. Una llave pertenece a UN proyecto,
+    así que se muestra cuál -- si dos bots comparten proyecto, se ve acá."""
+    llave_publica = os.environ.get("LANGFUSE_PUBLIC_KEY")
+    llave_secreta = os.environ.get("LANGFUSE_SECRET_KEY")
+    base = _host_langfuse()
+    if _falta(llave_publica) or _falta(llave_secreta) or not base:
+        return  # ya lo reporta chequear_langfuse
+    try:
+        respuesta = httpx.get(
+            f"{base.rstrip('/')}/api/public/projects",
+            auth=(llave_publica, llave_secreta), timeout=_TIMEOUT_RED,
+        )
+    except Exception as exc:
+        yield Hallazgo(AVISO, f"no se pudo contactar a Langfuse en {base}", repr(exc))
+        return
+    if respuesta.status_code == 401:
+        yield Hallazgo(
+            FALLA, f"Langfuse rechaza las llaves en {base} (401)",
+            "llaves de otro host o revocadas: el bot funciona, pero cada traza se "
+            "pierde en silencio.",
+        )
+        return
+    if respuesta.status_code != 200:
+        yield Hallazgo(AVISO, f"Langfuse respondió {respuesta.status_code} en {base}",
+                       respuesta.text[:200])
+        return
+    proyectos = [p.get("name", "?") for p in respuesta.json().get("data", [])]
+    yield Hallazgo(OK, "llaves de Langfuse válidas", f"proyecto: {', '.join(proyectos) or '?'}")
 
 
 # --------------------------------------------------------------------------
@@ -786,7 +825,7 @@ def chequear_whatsapp(opciones):
 SECCIONES = {
     "config": [chequear_variables_obligatorias, chequear_cliente_activo,
                chequear_rag_schema, chequear_schema_efectivo, chequear_langfuse,
-               chequear_token_interno],
+               chequear_credenciales_langfuse, chequear_token_interno],
     "modelos": [chequear_modelos_declarados, chequear_orden_de_proveedores,
                 chequear_catalogo_openrouter],
     "rag": [chequear_dimension_embeddings, chequear_supabase],
@@ -799,7 +838,8 @@ SECCIONES = {
 
 # Chequeos que salen a la red. Con --sin-red se saltean, para poder correr el
 # comando en un entorno sin credenciales ni salida a internet.
-CHEQUEOS_CON_RED = {chequear_catalogo_openrouter, chequear_supabase, chequear_whatsapp}
+CHEQUEOS_CON_RED = {chequear_catalogo_openrouter, chequear_credenciales_langfuse,
+                    chequear_supabase, chequear_whatsapp}
 
 
 class Command(BaseCommand):

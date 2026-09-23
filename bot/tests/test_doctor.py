@@ -21,7 +21,8 @@ from django.test import TestCase, override_settings
 
 from bot.management.commands.doctor import (
     AVISO, ESFUERZOS_QUE_PASA_EL_CODIGO, FALLA, OK, SECCIONES,
-    chequear_catalogo_openrouter, chequear_cliente_activo, chequear_dimension_embeddings,
+    chequear_catalogo_openrouter, chequear_cliente_activo, chequear_credenciales_langfuse,
+    chequear_langfuse, chequear_dimension_embeddings,
     chequear_rag_schema, chequear_tools_del_prompt, chequear_variables_obligatorias,
     _universo_de_tools,
 )
@@ -192,6 +193,59 @@ class CatalogoOpenrouterTest(TestCase):
         with patch("bot.management.commands.doctor._traer_catalogo_openrouter",
                    side_effect=RuntimeError("sin red")):
             self.assertEqual(_niveles(list(chequear_catalogo_openrouter({}))), [AVISO])
+
+
+_ENV_LANGFUSE = {
+    "LANGFUSE_PUBLIC_KEY": "pk-lf-prueba",
+    "LANGFUSE_SECRET_KEY": "sk-lf-prueba",
+    "LANGFUSE_BASE_URL": "https://langfuse.ejemplo.cl",
+}
+
+
+class _Respuesta:
+    def __init__(self, status_code, cuerpo=None):
+        self.status_code = status_code
+        self._cuerpo = cuerpo or {}
+        self.text = str(self._cuerpo)
+
+    def json(self):
+        return self._cuerpo
+
+
+class LangfuseTest(TestCase):
+    """El host no se compara contra uno fijo: se prueban las llaves contra el
+    host configurado. El chequeo viejo exigía us.cloud.langfuse.com y avisaba
+    en falso al pasar al self-hosted."""
+
+    def _credenciales(self, **kwargs):
+        with patch.dict(os.environ, _ENV_LANGFUSE), \
+                patch("bot.management.commands.doctor.httpx.get", **kwargs) as get:
+            return list(chequear_credenciales_langfuse({})), get
+
+    @patch.dict(os.environ, _ENV_LANGFUSE)
+    def test_un_host_cualquiera_no_avisa(self):
+        self.assertEqual(_niveles(list(chequear_langfuse({}))), [OK])
+
+    def test_sin_host_avisa_del_default_europeo(self):
+        env = {**_ENV_LANGFUSE, "LANGFUSE_BASE_URL": "", "LANGFUSE_HOST": ""}
+        with patch.dict(os.environ, env):
+            self.assertEqual(_niveles(list(chequear_langfuse({}))), [AVISO])
+
+    def test_llaves_validas_nombran_el_proyecto(self):
+        hallazgos, get = self._credenciales(
+            return_value=_Respuesta(200, {"data": [{"name": "bots intouch"}]}))
+        self.assertEqual(_niveles(hallazgos), [OK])
+        self.assertIn("bots intouch", hallazgos[0].detalle)
+        self.assertEqual(get.call_args.args[0],
+                         "https://langfuse.ejemplo.cl/api/public/projects")
+
+    def test_llaves_rechazadas_fallan(self):
+        hallazgos, _ = self._credenciales(return_value=_Respuesta(401))
+        self.assertEqual(_niveles(hallazgos), [FALLA])
+
+    def test_host_inalcanzable_avisa_pero_no_falla(self):
+        hallazgos, _ = self._credenciales(side_effect=RuntimeError("sin red"))
+        self.assertEqual(_niveles(hallazgos), [AVISO])
 
 
 class TablaDeEsfuerzosTest(TestCase):

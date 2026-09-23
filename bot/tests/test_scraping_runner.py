@@ -1,7 +1,7 @@
 from datetime import timedelta
 from unittest.mock import patch
 
-from django.test import TestCase
+from django.test import TestCase, override_settings
 from django.utils import timezone
 
 from bot.models import ScrapingSource, ScrapeRun, Servicio, Sucursal, VehiculoCatalogo, ScrapedPage
@@ -1179,3 +1179,24 @@ class RunnerTest(TestCase):
         self.assertEqual(Sucursal.objects.count(), 2)
         self.assertEqual(Sucursal.objects.get(nombre="Cantagallo").categorias, ["ventas"])
         self.assertEqual(Sucursal.objects.get(nombre="El Cortijo").categorias, ["servicio_tecnico"])
+
+
+class RunnerVerticalSinCatalogoTest(TestCase):
+    # Bug real (run 2, in-touch.cl, 2026-09-23): el sitio se indexó en el RAG
+    # -- 21 fragmentos -- pero el run quedó en "error" porque después se llamó
+    # a extract_catalog, que para este vertical levanta NotImplementedError. El
+    # panel mostraba una falla sobre algo que había funcionado.
+    @override_settings(CLIENTE_ACTIVO="intouch")
+    @patch("bot.scraping.runner.indexar_pagina_en_supabase")
+    @patch("bot.scraping.runner.extract_catalog")
+    @patch("bot.scraping.runner.crawl")
+    def test_sin_catalogo_estructurado_el_run_termina_ok_sin_llamar_al_extractor(
+        self, mock_crawl, mock_extract, mock_indexar,
+    ):
+        mock_crawl.return_value = ([{"url": "https://in-touch.cl/", "texto": "hola"}], [])
+        run = run_scrape(ScrapingSource.objects.create(url="https://in-touch.cl/", cliente="intouch"))
+        run.refresh_from_db()
+        self.assertEqual(run.estado, "ok", run.error_detalle)
+        self.assertEqual(run.paginas_procesadas, 1)
+        mock_extract.assert_not_called()
+        mock_indexar.assert_called_once()

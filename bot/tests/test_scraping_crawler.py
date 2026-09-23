@@ -393,8 +393,12 @@ class ExtraerTextoYEnlacesFallbackCoberturaTest(SimpleTestCase):
             b'<div class="horario">Todos los dias 10:00 a 21:00</div></div>'
             b'</body></html>'
         )
+        # Desde que _extraer_secciones toma los bloques hoja (2026-09-23), esta
+        # página ya no necesita el fallback: el contenido entra con su sección y
+        # con categoría. Lo que el test protege sigue igual -- que no se pierda.
         texto, _, _, secciones, _ = _extraer_texto_y_enlaces("https://renault.cl/concesionarios/", html)
-        self.assertEqual(secciones, [])
+        self.assertEqual([s["titulo"] for s in secciones], ["Encuentra tu sucursal"])
+        self.assertIn("Av. Siempre Viva 123, Lo Barnechea", secciones[0]["texto"])
         self.assertIn("AUTOKAS", texto)
         self.assertIn("Av. Siempre Viva 123, Lo Barnechea", texto)
         self.assertIn("DITALCAR", texto)
@@ -414,12 +418,13 @@ class ExtraerTextoYEnlacesFallbackCoberturaTest(SimpleTestCase):
 
     @patch("bot.scraping.crawler.logger")
     def test_activa_fallback_deja_un_log_de_advertencia_con_la_url(self, mock_logger):
+        # Texto suelto directo en un <div> contenedor (no hoja): ni p/li/table
+        # ni un bloque hoja lo cubren, así que sigue haciendo falta el fallback.
         html = (
             b'<html><body>'
             b'<h2>Encuentra tu sucursal</h2>'
-            b'<div class="tarjeta"><div class="nombre">AUTOKAS</div>'
-            b'<div class="direccion">Av. Siempre Viva 123, Lo Barnechea</div>'
-            b'<div class="horario">Lun a Vie 09:00 a 18:00</div></div>'
+            b'<div class="tarjeta">AUTOKAS, Av. Siempre Viva 123, Lo Barnechea, Lun a Vie 09:00 a 18:00'
+            b'<div class="mapa"></div></div>'
             b'</body></html>'
         )
         _extraer_texto_y_enlaces("https://renault.cl/concesionarios/", html)
@@ -1105,3 +1110,132 @@ class CrawlDefaultsTest(SimpleTestCase):
         # pagina simplemente nunca se visitaba.
         firma = inspect.signature(crawl)
         self.assertEqual(firma.parameters["max_pages"].default, 120)
+
+
+class ExtraerSeccionesBloquesSueltosTest(SimpleTestCase):
+    # Bug real (in-touch.cl, scrapeo del 2026-09-23): la dirección, las cifras
+    # de la empresa y los KPIs viven en <div>/<span> sin p/li/table/h1-3.
+    # _extraer_secciones solo miraba esas etiquetas, y como el resto de la
+    # página sí estaba bien etiquetado, la cobertura pasó el piso del 50% y el
+    # fallback a texto plano nunca se activó: el dato se perdió sin aviso.
+    def _secciones(self, html: str) -> list[dict]:
+        return _extraer_secciones(BeautifulSoup(html, "html.parser"))
+
+    def test_texto_de_un_div_hoja_queda_en_la_seccion_de_su_encabezado(self):
+        html = (
+            "<html><body><h2>Contacto</h2><p>Agenda una consultoría.</p>"
+            "<div><div>Chile</div><div>Av. Irarrázaval 2470<br/>Ñuñoa, Santiago</div></div>"
+            "</body></html>"
+        )
+        secciones = self._secciones(html)
+        self.assertEqual(len(secciones), 1)
+        self.assertIn("Chile", secciones[0]["texto"])
+        self.assertIn("Av. Irarrázaval 2470 Ñuñoa, Santiago", secciones[0]["texto"])
+
+    def test_cifras_en_spans_dentro_de_un_div_hoja_quedan_juntas(self):
+        html = (
+            "<html><body><h2>Analytics</h2>"
+            "<div class='kpi'><span>Tasa de resolución IA</span><span>83%</span></div>"
+            "</body></html>"
+        )
+        secciones = self._secciones(html)
+        self.assertIn("Tasa de resolución IA 83%", secciones[0]["texto"])
+
+    def test_div_hoja_dentro_de_un_li_no_se_duplica(self):
+        html = "<html><body><h2>Planes</h2><ul><li><div>Plan básico</div></li></ul></body></html>"
+        secciones = self._secciones(html)
+        self.assertEqual(secciones[0]["texto"].count("Plan básico"), 1)
+
+    def test_seccion_identica_repetida_se_descarta(self):
+        # in-touch.cl repite el hero para escritorio y para celular: sin esto,
+        # el mismo fragmento entraba dos veces al RAG.
+        html = (
+            "<html><body>"
+            "<h1>Transformamos la experiencia</h1><p>IA + Personas y Datos.</p>"
+            "<h1>Transformamos la experiencia</h1><p>IA + Personas y Datos.</p>"
+            "</body></html>"
+        )
+        self.assertEqual(len(self._secciones(html)), 1)
+
+    def test_bloque_repetido_con_un_agregado_no_duplica_lo_repetido(self):
+        html = (
+            "<html><body>"
+            "<h1>Transformamos</h1><p>IA + Personas.</p>"
+            "<h1>Transformamos</h1><p>IA + Personas.</p><div>Soluciones según tu punto de partida</div>"
+            "</body></html>"
+        )
+        texto = "\n".join(s["texto"] for s in self._secciones(html))
+        self.assertEqual(texto.count("IA + Personas."), 1)
+        self.assertIn("Soluciones según tu punto de partida", texto)
+
+    def test_etiquetas_de_un_formulario_no_son_contenido(self):
+        html = (
+            "<html><body><h2>Agenda</h2><p>Déjanos tus datos.</p>"
+            "<form><div>Nombre completo</div><div>Empresa</div></form>"
+            "</body></html>"
+        )
+        texto = self._secciones(html)[0]["texto"]
+        self.assertNotIn("Nombre completo", texto)
+
+
+class ExtraerTextoYEnlacesPieDePaginaTest(SimpleTestCase):
+    # El <footer> se borra entero porque en un sitio de muchas páginas repite
+    # los mismos enlaces en cada una. Pero es donde casi todo sitio publica el
+    # teléfono y el correo: in-touch.cl los tiene SOLO ahí.
+    def test_rescata_telefono_y_correo_del_pie_con_su_etiqueta(self):
+        html = (
+            b'<html><body><h2>Inicio</h2><p>Hola.</p>'
+            b'<footer><ul><li><a href="#soluciones">Soluciones</a></li></ul>'
+            b'<div><div>Recursos Humanos</div>'
+            b'<a href="mailto:rrhh@x.cl">rrhh@x.cl</a>'
+            b'<a href="tel:+56229273619">+56 2 2927 3619</a></div></footer>'
+            b'</body></html>'
+        )
+        texto, _, _, secciones, _ = _extraer_texto_y_enlaces("https://x.cl/", html)
+        pie = secciones[-1]
+        self.assertIn("Recursos Humanos", pie["texto"])
+        self.assertIn("+56 2 2927 3619", pie["texto"])
+        self.assertIn("rrhh@x.cl", pie["texto"])
+        self.assertNotIn("Soluciones", pie["texto"])
+        self.assertIn("+56 2 2927 3619", texto)
+
+    def test_pie_sin_datos_de_contacto_no_agrega_seccion(self):
+        html = (
+            b'<html><body><h2>Inicio</h2><p>Hola.</p>'
+            b'<footer><ul><li><a href="#soluciones">Soluciones</a></li></ul></footer>'
+            b'</body></html>'
+        )
+        _, _, _, secciones, _ = _extraer_texto_y_enlaces("https://x.cl/", html)
+        self.assertEqual([s["titulo"] for s in secciones], ["Inicio"])
+
+    def test_correo_ofuscado_por_cloudflare_se_decodifica(self):
+        # Cloudflare reemplaza el correo por "[email protected]" y lo guarda
+        # cifrado con XOR en data-cfemail; el enlace apunta a /cdn-cgi/, que
+        # además el crawler encolaría como una página más.
+        html = (
+            b'<html><body><h2>Inicio</h2><p>Hola.</p><footer><div>'
+            b'<a href="/cdn-cgi/l/email-protection#601212080820090e4d140f15030803120d4e030c">'
+            b'<span class="__cf_email__" data-cfemail="beccccd6d6fed7d093cad1cbddd6ddccd390ddd2">'
+            b'[email&#160;protected]</span></a>'
+            b'<a href="tel:+56229273619">+56 2 2927 3619</a></div></footer>'
+            b'</body></html>'
+        )
+        texto, enlaces, _, _, _ = _extraer_texto_y_enlaces("https://x.cl/", html)
+        self.assertIn("rrhh@in-touchcrm.cl", texto)
+        self.assertNotIn("protected", texto)
+        self.assertFalse([e for e in enlaces if "/cdn-cgi/" in e])
+
+
+class ExtraerTextoYEnlacesSitioInTouchTest(SimpleTestCase):
+    # Regresión contra el HTML real de in-touch.cl (descargado el 2026-09-23):
+    # los datos que el gerente comercial preguntó en el chat 9 y que el bot no
+    # tenía.
+    def test_quedan_telefono_direccion_y_cifras(self):
+        ruta = os.path.join(os.path.dirname(__file__), "fixtures", "in-touch.cl.html")
+        with open(ruta, "rb") as f:
+            texto, _, _, secciones, _ = _extraer_texto_y_enlaces("https://in-touch.cl/", f.read())
+        self.assertTrue(secciones, "la página cayó al fallback de texto plano, sin categorías")
+        for dato in ("+56 2 2927 3619", "Av. Irarrázaval 2470", "Lima, Perú",
+                     "Clientes activos", "Años experiencia", "83%", "rrhh@in-touchcrm.cl",
+                     "consultoría estratégica gratuita"):
+            self.assertIn(dato, texto)

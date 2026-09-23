@@ -165,17 +165,47 @@ _TAGS_CONTENIDO = ("p", "li", "table", "h1", "h2", "h3")
 _COBERTURA_MINIMA_SECCIONES = 0.5
 
 
+# Bloques de maquetación que pueden cargar texto sin ningún p/li/table/h1-3
+# adentro. Solo se toman si son HOJA -- sin otro bloque ni contenido adentro --:
+# así un <div> contenedor no arrastra el texto de toda la página, y el texto de
+# un bloque hoja queda una sola vez.
+_TAGS_BLOQUE_SUELTO = ("div", "address", "small", "dd", "dt", "figcaption", "blockquote")
+_TAGS_QUE_NO_SON_HOJA = _TAGS_CONTENIDO + _TAGS_BLOQUE_SUELTO + ("ul", "ol", "section", "article")
+
+
+def _es_bloque_hoja(el) -> bool:
+    return el.find(_TAGS_QUE_NO_SON_HOJA) is None
+
+
 def _extraer_secciones(soup: BeautifulSoup) -> list[dict]:
     """Recorre los elementos de contenido en orden de documento y los agrupa
     por el encabezado (h1/h2/h3) que los precede. Una tabla se trata como
     contenido de la seccion activa (no rompe agrupamiento). El texto sin
     ningun encabezado antes (ej. el primer parrafo introductorio de la
-    pagina) queda en una seccion con titulo=None al principio de la lista."""
+    pagina) queda en una seccion con titulo=None al principio de la lista.
+
+    Además de p/li/table toma los bloques hoja de maquetación
+    (_TAGS_BLOQUE_SUELTO). Bug real en in-touch.cl (2026-09-23): la dirección,
+    las cifras de la empresa y los KPIs vivían en <div>/<span>, el resto de la
+    página sí estaba en <p>, así que la cobertura pasaba el piso y el fallback
+    a texto plano no se activaba: esos datos se perdían sin aviso.
+
+    Un párrafo que ya apareció bajo el mismo título se descarta, y una
+    sección que queda vacía por eso desaparece: los sitios repiten bloques
+    para escritorio y para celular."""
     secciones: list[dict] = []
     actual: dict | None = None
-    for el in soup.find_all(_TAGS_CONTENIDO):
+    # (título de la sección, párrafo): el mismo párrafo bajo el mismo título
+    # entra una sola vez, aunque el bloque repetido traiga algo más al lado.
+    vistos: set[tuple] = set()
+    for el in soup.find_all(_TAGS_CONTENIDO + _TAGS_BLOQUE_SUELTO):
         if el.name not in _TAGS_ENCABEZADO and el.find_parent(_TAGS_CONTENIDO) is not None:
             continue  # ya viene incluido en el texto de su ancestro
+        if el.name in _TAGS_BLOQUE_SUELTO and (not _es_bloque_hoja(el) or el.find_parent("form")):
+            # No hoja: su texto lo aportan los bloques hoja de adentro. Dentro
+            # de un <form>: son las etiquetas de los campos ("Nombre completo",
+            # "Empresa"), no contenido.
+            continue
         if el.name in _TAGS_ENCABEZADO:
             titulo = el.get_text(separator=" ", strip=True)
             if not titulo:
@@ -184,8 +214,10 @@ def _extraer_secciones(soup: BeautifulSoup) -> list[dict]:
             secciones.append(actual)
             continue
         texto_el = el.get_text(separator=" ", strip=True)
-        if not texto_el:
+        titulo_actual = actual["titulo"] if actual else None
+        if not texto_el or (titulo_actual, texto_el) in vistos:
             continue
+        vistos.add((titulo_actual, texto_el))
         if actual is None:
             actual = {"titulo": None, "texto": ""}
             secciones.append(actual)
@@ -193,8 +225,59 @@ def _extraer_secciones(soup: BeautifulSoup) -> list[dict]:
     return [s for s in secciones if s["texto"]]
 
 
+_PREFIJO_EMAIL_CLOUDFLARE = "/cdn-cgi/l/email-protection#"
+
+
+def _decodificar_email_cloudflare(cifrado: str) -> str | None:
+    """Cloudflare esconde los correos de la página como hex con XOR: el primer
+    byte es la llave y el resto, cada caracter XOR la llave."""
+    try:
+        llave = int(cifrado[:2], 16)
+        return "".join(chr(int(cifrado[i:i + 2], 16) ^ llave) for i in range(2, len(cifrado), 2))
+    except ValueError:
+        return None
+
+
+def _decodificar_emails_cloudflare(soup: BeautifulSoup) -> None:
+    """Reemplaza "[email protected]" por el correo real y el enlace a
+    /cdn-cgi/ por un mailto:. Sin esto el correo no llega al RAG y el crawler
+    encola /cdn-cgi/l/email-protection como si fuera una página del sitio."""
+    for span in soup.find_all(attrs={"data-cfemail": True}):
+        correo = _decodificar_email_cloudflare(span["data-cfemail"])
+        if correo:
+            span.replace_with(correo)
+    for a in soup.find_all("a", href=True):
+        if _PREFIJO_EMAIL_CLOUDFLARE in a["href"]:
+            correo = _decodificar_email_cloudflare(a["href"].split("#", 1)[1])
+            a["href"] = f"mailto:{correo}" if correo else ""
+
+
+def _contacto_del_pie(soup: BeautifulSoup) -> dict | None:
+    """Rescata del <footer> los bloques que traen un enlace tel: o mailto:,
+    con la etiqueta que los acompaña (ej. "Recursos Humanos"), antes de que el
+    footer se borre. El footer se sigue borrando entero porque en un sitio de
+    muchas páginas repite los mismos enlaces de navegación en cada una, pero es
+    donde casi todo sitio publica el teléfono y el correo: in-touch.cl los
+    tenía SOLO ahí y el bot respondía que no tenía el teléfono de InTouch."""
+    bloques = []
+    for footer in soup.find_all("footer"):
+        for a in footer.find_all("a", href=True):
+            if not a["href"].startswith(("tel:", "mailto:")):
+                continue
+            bloque = a.find_parent(("div", "p", "li", "address")) or a
+            if bloque not in bloques and not any(bloque in b.descendants for b in bloques):
+                bloques.append(bloque)
+    textos = [b.get_text(separator="\n", strip=True) for b in bloques]
+    textos = [t for t in textos if t]
+    if not textos:
+        return None
+    return {"titulo": "Datos de contacto del pie de página", "texto": "\n\n".join(textos)}
+
+
 def _extraer_texto_y_enlaces(url: str, html: bytes) -> tuple[str, list[str], list[dict], list[dict], dict]:
     soup = BeautifulSoup(html, "html.parser")
+    _decodificar_emails_cloudflare(soup)
+    contacto_pie = _contacto_del_pie(soup)
     for tag in soup(["script", "style", "nav", "footer"]):
         tag.decompose()
     estructurados = extraer_estructurados(soup)
@@ -219,6 +302,14 @@ def _extraer_texto_y_enlaces(url: str, html: bytes) -> tuple[str, list[str], lis
         )
         texto = texto_plano
         secciones = []
+    if contacto_pie:
+        # Con fallback a texto plano (secciones=[]) solo se suma al texto: una
+        # sección suelta haría que el indexador tratara la página como
+        # estructurada y perdiera el resto.
+        if secciones:
+            secciones.append(contacto_pie)
+        bloque_pie = f"{contacto_pie['titulo']}\n\n{contacto_pie['texto']}"
+        texto = f"{texto}\n\n{bloque_pie}" if texto else bloque_pie
     enlaces = []
     for a in soup.find_all("a", href=True):
         enlaces.append(urljoin(url, a["href"]))

@@ -1,0 +1,1847 @@
+<!DOCTYPE html>
+<html lang="es">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>InTouch — Contactability Solutions</title>
+  <meta name="description" content="Diseñamos, implementamos y operamos Contact Centers Humanos, Automatizados con IA o Híbridos, con foco en eficiencia, escalabilidad y rentabilidad.">
+  <link rel="icon" type="image/png" href="assets/img/huella.png">
+  <link rel="apple-touch-icon" href="assets/img/huella.png">
+  <!-- Meta Pixel Code -->
+  <script>
+  !function(f,b,e,v,n,t,s)
+  {if(f.fbq)return;n=f.fbq=function(){n.callMethod?
+  n.callMethod.apply(n,arguments):n.queue.push(arguments)};
+  if(!f._fbq)f._fbq=n;n.push=n;n.loaded=!0;n.version='2.0';
+  n.queue=[];t=b.createElement(e);t.async=!0;
+  t.src=v;s=b.getElementsByTagName(e)[0];
+  s.parentNode.insertBefore(t,s)}(window, document,'script',
+  'https://connect.facebook.net/en_US/fbevents.js');
+  fbq('init', '729354011518556');
+  fbq('track', 'PageView');
+  </script>
+  <noscript><img height="1" width="1" style="display:none"
+  src="https://www.facebook.com/tr?id=729354011518556&ev=PageView&noscript=1"
+  /></noscript>
+  <!-- End Meta Pixel Code -->
+
+  <!-- Google Tag Manager -->
+  <script>(function(w,d,s,l,i){w[l]=w[l]||[];w[l].push({'gtm.start':
+  new Date().getTime(),event:'gtm.js'});var f=d.getElementsByTagName(s)[0],
+  j=d.createElement(s),dl=l!='dataLayer'?'&l='+l:'';j.async=true;j.src=
+  'https://www.googletagmanager.com/gtm.js?id='+i+dl;f.parentNode.insertBefore(j,f);
+  })(window,document,'script','dataLayer','GTM-MS62PKC');</script>
+  <!-- End Google Tag Manager -->
+  <style>
+    @font-face { font-family: 'Blinker'; src: url('assets/font/Blinker-SemiBold.ttf'); font-weight: 100 900; }
+    @font-face { font-family: 'BlinkerBold'; src: url('assets/font/Blinker-Bold.ttf'); font-weight: 100 900; }
+    @font-face { font-family: 'BlinkerBold'; src: url('assets/font/Blinker-Bold.ttf'); }
+  </style>
+  <style>
+    *, *::before, *::after { box-sizing: border-box; margin: 0; padding: 0; }
+
+    :root {
+      --bg:        #FFF8F8;
+      --bg2:       #FFFFFF;
+      --bg3:       #FFF0F0;
+      --blue:      #E3032E;
+      --purple:    #E3032E;
+      --cyan:      #E3032E;
+      --grad:      linear-gradient(135deg, #E3032E 0%, #E3032E 100%);
+      --grad-text: linear-gradient(135deg, #E3032E 0%, #E3032E 100%);
+      --text:      #0F172A;
+      --text2:     #475569;
+      --border:    rgba(15,23,42,0.09);
+      --radius:    14px;
+    }
+
+    html { scroll-behavior: smooth; }
+
+    body {
+      font-family: 'Blinker', sans-serif;
+      background: var(--bg);
+      color: var(--text);
+      line-height: 1.6;
+      overflow-x: hidden;
+    }
+
+    /* ── UTILS ────────────────────────────── */
+    .container { max-width: 1200px; margin: 0 auto; padding: 0 24px; }
+    .grad-text {
+      background: var(--grad-text);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .tag {
+      display: inline-block;
+      padding: 4px 14px;
+      border: 1px solid rgba(220,31,38,0.35);
+      border-radius: 100px;
+      font-size: 12px;
+      font-weight: 700;
+      letter-spacing: .06em;
+      text-transform: uppercase;
+      color: #E3032E;
+      background: rgba(220,31,38,0.08);
+      margin-bottom: 20px;
+    }
+    .section-label { text-align: center; margin-bottom: 36px; }
+    .section-label h2 {
+      font-size: clamp(26px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+    }
+    .section-label p {
+      margin-top: 16px;
+      color: var(--text2);
+      font-size: 17px;
+      max-width: 600px;
+      margin-left: auto;
+      margin-right: auto;
+    }
+
+    /* ── NAV ──────────────────────────────── */
+    nav {
+      position: fixed;
+      top: 0; left: 0; right: 0;
+      z-index: 100;
+      background: rgba(255,240,240,0.97);
+      backdrop-filter: blur(16px);
+      border-bottom: 1px solid rgba(220,31,38,0.15);
+    }
+    .nav-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      height: 68px;
+    }
+    .logo {
+      display: flex;
+      align-items: center;
+      gap: 10px;
+      text-decoration: none;
+    }
+    .logo img { height: 50px; display: block; mix-blend-mode: multiply; }
+    .logo-wordmark {
+      display: flex;
+      align-items: center;
+      gap: 0;
+      font-size: 28px;
+      font-weight: 900;
+      letter-spacing: -.02em;
+      line-height: 1;
+    }
+    .logo-wordmark .dot {
+      display: inline-block;
+      width: 10px; height: 10px;
+      background: #E84012;
+      border-radius: 50%;
+      margin-right: 1px;
+      margin-bottom: 16px;
+      flex-shrink: 0;
+    }
+    .logo-wordmark .in  { color: #E84012; }
+    .logo-wordmark .touch { color: #2B2D4A; }
+    .logo-badge {
+      font-size: 10px;
+      font-weight: 700;
+      letter-spacing: .08em;
+      text-transform: uppercase;
+      color: #E3032E;
+      border-left: 1px solid var(--border);
+      padding-left: 10px;
+    }
+    .nav-links {
+      display: flex;
+      gap: 32px;
+      list-style: none;
+    }
+    .nav-links a {
+      color: #0F172A;
+      text-decoration: none;
+      font-size: 16px;
+      font-weight: 700;
+      font-family: 'BlinkerBold', sans-serif;
+      letter-spacing: .01em;
+      padding: 6px 12px;
+      border-radius: 6px;
+      transition: background .2s, color .2s;
+    }
+    .nav-links a:hover { background: rgba(220,31,38,0.12); color: #E3032E; }
+    .nav-cta {
+      background: var(--grad);
+      color: #fff !important;
+      padding: 9px 22px;
+      border-radius: 8px;
+      font-weight: 600 !important;
+      font-size: 14px !important;
+      transition: opacity .2s !important;
+    }
+    .nav-cta:hover { opacity: .85; }
+    @media (max-width: 768px) {
+      .nav-links { display: none; }
+      .logo-badge { display: none; }
+      .nav-inner { position: relative; justify-content: center; }
+      .nav-inner .logo { position: absolute; left: 50%; transform: translateX(-50%); }
+      .hamburger { position: absolute; left: 0; }
+      #contacto { display: none; }
+    }
+    @media (min-width: 769px) {
+      #agenda { display: none; }
+    }
+    .hamburger {
+      display: none;
+      flex-direction: column;
+      gap: 5px;
+      cursor: pointer;
+      padding: 6px;
+      background: none;
+      border: none;
+    }
+    .hamburger span {
+      display: block;
+      width: 24px;
+      height: 2px;
+      background: var(--text);
+      border-radius: 2px;
+      transition: transform .3s, opacity .3s;
+    }
+    @media (max-width: 768px) {
+      .hamburger { display: flex; }
+    }
+    .drawer {
+      display: none;
+      position: fixed;
+      inset: 0;
+      background: #FAF9F7;
+      z-index: 1000;
+      flex-direction: column;
+    }
+    .drawer.open { display: flex; }
+    .drawer-header {
+      display: flex;
+      justify-content: space-between;
+      align-items: center;
+      padding: 20px 24px;
+      border-bottom: 1px solid var(--border);
+      background: #fff;
+    }
+    .drawer-close {
+      position: fixed;
+      top: 14px;
+      right: 14px;
+      background: #E3032E;
+      border: none;
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      font-size: 20px;
+      color: #fff;
+      cursor: pointer;
+      display: none;
+      align-items: center;
+      justify-content: center;
+      font-weight: 700;
+      z-index: 1100;
+    }
+    .drawer-close.visible { display: flex; }
+    .drawer-body {
+      flex: 1;
+      overflow-y: auto;
+      padding: 16px 0;
+    }
+    .drawer nav a {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      padding: 20px 28px;
+      font-size: 18px;
+      font-weight: 600;
+      color: var(--text);
+      text-decoration: none;
+      border-bottom: 1px solid var(--border);
+    }
+    .drawer nav a::after {
+      content: '›';
+      font-size: 22px;
+      color: var(--text2);
+    }
+    .drawer nav a:last-child { border-bottom: none; }
+    .drawer-footer {
+      padding: 24px 28px;
+      border-top: 1px solid var(--border);
+      background: #FAF9F7;
+    }
+    @media (max-width: 768px) {
+      #hero img { height: 340px !important; object-fit: cover; object-position: center; }
+      .hero-overlay-desktop { display: none !important; }
+      .hero-below-mobile { display: block !important; }
+    }
+
+    /* ── HERO ─────────────────────────────── */
+    #hero {
+      padding: 110px 0 80px;
+      position: relative;
+      overflow: hidden;
+    }
+    .hero-grid {
+      position: absolute;
+      inset: 0;
+      background-image:
+        linear-gradient(rgba(220,31,38,0.06) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(220,31,38,0.06) 1px, transparent 1px);
+      background-size: 60px 60px;
+    }
+    .hero-glow {
+      position: absolute;
+      top: -200px; left: 50%;
+      transform: translateX(-50%);
+      width: 900px; height: 600px;
+      background: radial-gradient(ellipse at center, rgba(220,31,38,0.08) 0%, transparent 70%);
+      pointer-events: none;
+    }
+    .hero-content {
+      position: relative;
+      text-align: center;
+      max-width: 820px;
+      margin: 0 auto;
+    }
+    .hero-content h1 {
+      font-size: clamp(34px, 5.5vw, 62px);
+      font-weight: 900;
+      letter-spacing: -.03em;
+      line-height: 1.08;
+      margin-bottom: 24px;
+    }
+    .hero-content p {
+      font-size: clamp(16px, 2vw, 19px);
+      color: var(--text2);
+      max-width: 620px;
+      margin: 0 auto 16px;
+    }
+    .hero-sub {
+      font-size: 15px !important;
+      color: #64748B !important;
+
+      margin-bottom: 40px !important;
+    }
+    .hero-btns {
+      display: flex;
+      gap: 16px;
+      justify-content: center;
+      flex-wrap: wrap;
+    }
+    .btn-primary {
+      background: var(--grad);
+      color: #fff;
+      padding: 14px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 700;
+      font-size: 15px;
+      transition: opacity .2s, transform .2s;
+      display: inline-flex;
+      align-items: center;
+      gap: 8px;
+    }
+    .btn-primary:hover { opacity: .88; transform: translateY(-1px); }
+    .btn-secondary {
+      border: 2px solid #E3032E;
+      color: #E3032E;
+      padding: 14px 32px;
+      border-radius: 10px;
+      text-decoration: none;
+      font-weight: 600;
+      font-size: 15px;
+      background: transparent;
+      transition: background .2s, color .2s, transform .2s;
+    }
+    .btn-secondary:hover { background: #E3032E; color: #fff; transform: translateY(-1px); }
+    .hero-tridente {
+      margin-top: 48px;
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 1px;
+      background: var(--border);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: hidden;
+    }
+    .tridente-item {
+      background: var(--bg2);
+      padding: 28px 24px;
+      text-align: center;
+    }
+    .tridente-item .num {
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #E3032E;
+      margin-bottom: 8px;
+    }
+    .tridente-item h3 {
+      font-size: 16px;
+      font-weight: 700;
+      margin-bottom: 8px;
+    }
+    .tridente-item p {
+      font-size: 13px;
+      color: var(--text2);
+      line-height: 1.5;
+    }
+    @media (max-width: 640px) {
+      .hero-tridente { grid-template-columns: 1fr; }
+    }
+
+    /* ── SECTION BASE ─────────────────────── */
+    section { padding: 72px 0; }
+
+    /* ── SOLUCIONES ───────────────────────── */
+    #soluciones { background: var(--bg2); }
+    .soluciones-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .sol-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: visible;
+      display: flex;
+      flex-direction: column;
+      transition: transform .25s, border-color .25s;
+      position: relative;
+    }
+    .sol-card:hover {
+      border-color: transparent;
+    }
+    .card-border-svg {
+      position: absolute;
+      top: -4px; left: -4px;
+      width: calc(100% + 8px); height: calc(100% + 8px);
+      pointer-events: none;
+      z-index: 10;
+      overflow: visible;
+    }
+    .card-border-svg rect {
+      fill: none;
+      stroke: #E3032E;
+      stroke-width: 2.5;
+      stroke-dasharray: 100;
+      stroke-dashoffset: 100;
+      transition: stroke-dashoffset 0s;
+    }
+    .sol-card:hover .card-border-svg rect {
+      stroke-dashoffset: 0;
+      transition: stroke-dashoffset 2.5s ease;
+    }
+    .sol-img {
+      width: 100%;
+      height: 200px;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 72px;
+      background: var(--bg3);
+      overflow: hidden;
+      border-radius: calc(var(--radius) - 1px) calc(var(--radius) - 1px) 0 0;
+      position: relative;
+    }
+    .sol-img::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 30%;
+      background: linear-gradient(to bottom, transparent, var(--bg2));
+      pointer-events: none;
+    }
+    .sol-img img {
+      width: 100%;
+      height: 100%;
+      object-fit: cover;
+      opacity: 0.8;
+      transition: opacity .3s;
+    }
+    .sol-card:hover .sol-img img {
+      opacity: 1;
+    }
+    .sol-body {
+      padding: 28px 24px;
+      display: flex;
+      flex-direction: column;
+      flex: 1;
+    }
+    .sol-card h3 {
+      font-size: 18px;
+      font-weight: 800;
+      margin-bottom: 12px;
+      color: var(--text);
+    }
+    .sol-card p {
+      font-size: 14px;
+      color: var(--text2);
+      line-height: 1.65;
+      flex: 1;
+    }
+    .sol-overlay {
+      position: absolute;
+      inset: 0;
+      background: rgba(228,3,47,0.92);
+      color: #fff;
+      display: flex;
+      flex-direction: column;
+      justify-content: center;
+      padding: 32px 28px;
+      opacity: 0;
+      transition: opacity .35s ease;
+      z-index: 5;
+      border-radius: var(--radius);
+    }
+    .sol-card:hover .sol-overlay {
+      opacity: 1;
+    }
+    .sol-overlay h3 {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 16px;
+      color: #fff;
+    }
+    .sol-overlay p {
+      font-size: 14px;
+      line-height: 1.7;
+      color: rgba(255,255,255,0.9);
+    }
+    .sol-link {
+      display: inline-block;
+      margin-top: 20px;
+      color: #E3032E;
+      font-weight: 700;
+      font-size: 14px;
+      text-decoration: underline;
+      text-underline-offset: 3px;
+    }
+    @media (max-width: 768px) {
+      .soluciones-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── MODELOS ──────────────────────────── */
+    #modelos { background: var(--bg); }
+    .modelos-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 24px;
+    }
+    .modelo-card {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      overflow: visible;
+      display: flex;
+      flex-direction: column;
+      transition: border-color .25s;
+      position: relative;
+    }
+    .modelo-card:hover { border-color: transparent; }
+    .modelo-card:hover .card-border-svg rect { stroke-dashoffset: 0; transition: stroke-dashoffset 2.5s ease; }
+    .modelo-card .sol-img::after {
+      content: '';
+      position: absolute;
+      bottom: 0; left: 0; right: 0;
+      height: 30%;
+      background: linear-gradient(to bottom, transparent, var(--bg2));
+      pointer-events: none;
+    }
+    .modelo-badge {
+      position: absolute;
+      top: -12px; left: 50%;
+      transform: translateX(-50%);
+      background: var(--grad);
+      color: #fff;
+      padding: 4px 16px;
+      border-radius: 100px;
+      font-size: 11px;
+      font-weight: 700;
+      letter-spacing: .05em;
+      text-transform: uppercase;
+      white-space: nowrap;
+      z-index: 20;
+    }
+    .modelo-card h3 {
+      font-size: 20px;
+      font-weight: 800;
+      margin-bottom: 12px;
+    }
+    .modelo-card p {
+      font-size: 14px;
+      color: var(--text2);
+      line-height: 1.65;
+      flex: 1;
+    }
+    @media (max-width: 768px) {
+      .modelos-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── CAPACIDADES ──────────────────────── */
+    #capacidades { background: var(--bg2); }
+    .cap-header { text-align: center; margin-bottom: 8px; }
+    .cap-header p { color: var(--text2); font-size: 16px; margin-top: 16px; max-width: 700px; margin-left: auto; margin-right: auto; }
+    .cap-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: start;
+    }
+    .cap-left h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      line-height: 1.15;
+      margin-bottom: 20px;
+    }
+    .cap-left p {
+      color: var(--text2);
+      font-size: 16px;
+      margin-bottom: 32px;
+    }
+    .cap-list {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .cap-list li {
+      display: flex;
+      align-items: flex-start;
+      gap: 14px;
+      font-size: 15px;
+    }
+    .cap-check {
+      flex-shrink: 0;
+      width: 22px; height: 22px;
+      border-radius: 6px;
+      background: rgba(220,31,38,0.15);
+      border: 1px solid rgba(220,31,38,0.3);
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      font-size: 11px;
+      margin-top: 1px;
+    }
+    .tech-carousel-wrap { position: relative; overflow: clip; overflow-clip-margin: 6px; }
+    .tech-grid {
+      display: flex;
+      gap: 24px;
+      transition: transform 0.4s ease;
+    }
+    #capacidades .modelo-card {
+      flex: 0 0 calc(33.333% - 16px);
+      min-width: calc(33.333% - 16px);
+    }
+    @media (max-width: 768px) {
+      #capacidades .modelo-card { flex: 0 0 100%; min-width: 0; width: 100%; }
+      .tech-grid { gap: 0; }
+    }
+    @media (max-width: 768px) {
+      #capacidades .sol-img { height: 160px; }
+      #capacidades .sol-body { padding: 16px 18px; }
+      #capacidades .sol-body h3 { font-size: 15px; margin-bottom: 8px; }
+      #capacidades .sol-body p { font-size: 13px; line-height: 1.5; }
+      .cap-header p { font-size: 13px; }
+      #capacidades .modelo-card { flex: 0 0 100%; min-width: 0; width: 100%; }
+      .tech-grid { gap: 0; }
+    }
+    .tech-nav {
+      display: flex;
+      justify-content: center;
+      align-items: center;
+      gap: 16px;
+      margin-top: 24px;
+      padding: 12px 0;
+    }
+    .tech-btn {
+      width: 44px; height: 44px;
+      border-radius: 50%;
+      border: 2px solid #E3032E;
+      background: #fff;
+      color: #E3032E;
+      cursor: pointer;
+      font-size: 20px;
+      display: flex; align-items: center; justify-content: center;
+      transition: background .2s, color .2s;
+      flex-shrink: 0;
+    }
+    .tech-btn:hover, .tech-btn:active { background: #E3032E; color: #fff; }
+    .tech-dots { display: flex; gap: 8px; align-items: center; }
+    .dots-mobile { display: none; }
+    @media (max-width: 768px) {
+      .dots-desktop { display: none; }
+      .dots-mobile { display: flex; }
+    }
+    .tech-dot {
+      width: 10px; height: 10px;
+      border-radius: 50%;
+      background: #ccc;
+      transition: background .2s, transform .2s;
+      cursor: pointer;
+    }
+    .tech-dot.active { background: #E3032E; transform: scale(1.3); }
+    .tech-dot.active { background: #E3032E; }
+    @media (max-width: 900px) {
+      .cap-layout { grid-template-columns: 1fr; gap: 48px; }
+    }
+
+    /* ── ANALYTICS ────────────────────────── */
+    #analytics { background: var(--bg); }
+    .analytics-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: stretch;
+    }
+    .analytics-visual {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 32px;
+      overflow: hidden;
+    }
+    .kpi-bar {
+      margin-bottom: 20px;
+    }
+    .kpi-bar-header {
+      display: flex;
+      justify-content: space-between;
+      font-size: 13px;
+      margin-bottom: 8px;
+      color: var(--text2);
+    }
+    .kpi-bar-header span:last-child { color: var(--text); font-weight: 600; }
+    .kpi-track {
+      height: 6px;
+      background: var(--bg3);
+      border-radius: 100px;
+      overflow: hidden;
+    }
+    .kpi-fill {
+      height: 100%;
+      border-radius: 100px;
+      background: var(--grad);
+      width: 0 !important;
+      transition: width 1.4s cubic-bezier(0.4, 0, 0.2, 1);
+    }
+    .kpi-fill.animated {
+      width: var(--target-width) !important;
+    }
+    .kpi-numbers {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 16px;
+      margin-top: 28px;
+    }
+    .kpi-num {
+      background: var(--bg3);
+      border-radius: 10px;
+      padding: 16px;
+      text-align: center;
+    }
+    .kpi-num .val {
+      font-size: 22px;
+      font-weight: 800;
+      background: var(--grad-text);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .kpi-num .lbl {
+      font-size: 11px;
+      color: #0F172A;
+      font-weight: 700;
+      margin-top: 4px;
+    }
+    .analytics-text h2 {
+      font-size: clamp(26px, 3.5vw, 38px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 16px;
+    }
+    .analytics-text p {
+      color: #0F172A;
+      font-size: 15px;
+      margin-bottom: 24px;
+      line-height: 1.7;
+    }
+    .analytics-pills {
+      display: flex;
+      flex-wrap: wrap;
+      gap: 10px;
+    }
+    .pill {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      padding: 8px 16px;
+      border-radius: 100px;
+      font-size: 13px;
+      font-weight: 500;
+    }
+    @media (max-width: 900px) {
+      .analytics-layout { grid-template-columns: 1fr; }
+    }
+
+    /* ── POR QUÉ ──────────────────────────── */
+    #porque { background: var(--bg2); }
+    .porque-grid {
+      display: grid;
+      grid-template-columns: repeat(3, 1fr);
+      gap: 20px;
+    }
+    .porque-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px 24px;
+      transition: border-color .25s;
+    }
+    .porque-card:hover { border-color: rgba(220,31,38,0.25); }
+    .porque-card .icon { font-size: 28px; margin-bottom: 14px; }
+    .porque-card h3 { font-size: 16px; font-weight: 700; margin-bottom: 8px; }
+    .porque-card p { font-size: 13px; color: var(--text2); line-height: 1.6; }
+    @media (max-width: 900px) {
+      .porque-grid { grid-template-columns: 1fr 1fr; }
+    }
+    @media (max-width: 600px) {
+      .porque-grid { grid-template-columns: 1fr; }
+    }
+
+    /* ── NOSOTROS ─────────────────────────── */
+    #nosotros { background: var(--bg); }
+    .nosotros-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: center;
+    }
+    .nosotros-text h2 {
+      font-size: clamp(28px, 4vw, 42px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 20px;
+    }
+    .nosotros-text p {
+      color: var(--text2);
+      font-size: 15px;
+      line-height: 1.75;
+      margin-bottom: 32px;
+    }
+    .cifras-grid {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 16px;
+    }
+    .cifra-box {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 12px;
+      padding: 24px 20px;
+      opacity: 0;
+      transform: translateY(24px);
+      transition: opacity 0.5s ease, transform 0.5s ease, border-color .25s;
+      position: relative;
+      overflow: visible;
+    }
+    .cifra-box.visible {
+      opacity: 1;
+      transform: translateY(0);
+    }
+    .cifra-box:hover { border-color: transparent; }
+    .cifra-box:hover .card-border-svg rect { stroke-dashoffset: 0; transition: stroke-dashoffset 2.5s ease; }
+    .cifra-box .num {
+      font-size: 32px;
+      font-weight: 900;
+      letter-spacing: -.03em;
+      background: var(--grad-text);
+      -webkit-background-clip: text;
+      -webkit-text-fill-color: transparent;
+      background-clip: text;
+    }
+    .cifra-box p {
+      font-size: 13px;
+      color: var(--text2);
+      margin-top: 6px;
+    }
+    @media (max-width: 900px) {
+      .nosotros-layout { grid-template-columns: 1fr; }
+    }
+
+    /* ── CONTACTO ─────────────────────────── */
+    #contacto {
+      background: var(--bg2);
+      position: relative;
+      overflow: hidden;
+    }
+    #contacto::before {
+      content: '';
+      position: absolute;
+      bottom: -200px; right: -200px;
+      width: 600px; height: 600px;
+      background: radial-gradient(ellipse, rgba(185,28,28,0.06) 0%, transparent 70%);
+    }
+    .contacto-layout {
+      display: grid;
+      grid-template-columns: 1fr 1fr;
+      gap: 80px;
+      align-items: start;
+    }
+    .contacto-info h2 {
+      font-size: clamp(28px, 4vw, 40px);
+      font-weight: 800;
+      letter-spacing: -.02em;
+      margin-bottom: 16px;
+    }
+    .contacto-info p {
+      color: var(--text2);
+      font-size: 15px;
+      line-height: 1.7;
+      margin-bottom: 32px;
+    }
+    .contacto-bullets {
+      list-style: none;
+      display: flex;
+      flex-direction: column;
+      gap: 16px;
+    }
+    .contacto-bullets li {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+      font-size: 14px;
+      color: var(--text2);
+    }
+    .contacto-bullets li span.dot {
+      width: 8px; height: 8px;
+      border-radius: 50%;
+      background: var(--grad);
+      flex-shrink: 0;
+    }
+    .form-card {
+      background: var(--bg3);
+      border: 1px solid var(--border);
+      border-radius: 16px;
+      padding: 20px 40px 40px;
+    }
+    .form-card h3 {
+      font-size: 20px;
+      font-weight: 700;
+      margin-bottom: 28px;
+    }
+    .form-row { display: grid; grid-template-columns: 1fr 1fr; gap: 8px; }
+    .form-group { margin-bottom: 8px; display: flex; flex-direction: column; }
+    .form-group label {
+      font-size: 12px;
+      font-weight: 600;
+      color: var(--text2);
+      margin-bottom: 8px;
+      letter-spacing: .04em;
+      text-transform: uppercase;
+    }
+    .form-group input,
+    .form-group textarea,
+    .form-group select {
+      background: var(--bg2);
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      padding: 12px 14px;
+      color: var(--text);
+      font-family: inherit;
+      font-size: 14px;
+      outline: none;
+      transition: border-color .2s;
+      width: 100%;
+    }
+    .form-group input:focus,
+    .form-group textarea:focus,
+    .form-group select:focus {
+      border-color: rgba(220,31,38,0.5);
+    }
+    .form-group textarea { resize: vertical; min-height: 100px; }
+    .form-group select option { background: #fff; color: #0F172A; }
+    .form-submit {
+      width: 100%;
+      background: var(--grad);
+      color: #fff;
+      border: none;
+      padding: 14px;
+      border-radius: 10px;
+      font-size: 15px;
+      font-weight: 700;
+      cursor: pointer;
+      font-family: inherit;
+      transition: opacity .2s;
+    }
+    .form-submit:hover { opacity: .88; }
+    @media (max-width: 900px) {
+      .contacto-layout { grid-template-columns: 1fr; }
+      .form-row { grid-template-columns: 1fr; }
+    }
+
+    /* ── FOOTER ───────────────────────────── */
+    footer {
+      background: var(--bg);
+      border-top: 1px solid var(--border);
+      padding: 40px 0;
+    }
+    .footer-inner {
+      display: flex;
+      align-items: center;
+      justify-content: space-between;
+      gap: 24px;
+      flex-wrap: wrap;
+    }
+    .footer-inner small { color: var(--text2); font-size: 13px; }
+    .footer-links {
+      display: flex;
+      gap: 28px;
+      list-style: none;
+    }
+    .footer-links a {
+      color: var(--text2);
+      text-decoration: none;
+      font-size: 13px;
+      transition: color .2s;
+    }
+    .footer-links a:hover { color: var(--text); }
+
+    /* ── SOCIAL PROOF ─────────────────────────── */
+    #social-proof {
+      background: #fff;
+      padding: 56px 0 48px;
+      border-top: 1px solid var(--border);
+      border-bottom: 1px solid var(--border);
+    }
+    .sp-heading {
+      text-align: center;
+      font-size: 13px;
+      font-weight: 700;
+      letter-spacing: .1em;
+      text-transform: uppercase;
+      color: #94a3b8;
+      margin-bottom: 32px;
+    }
+    .logos-row {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-wrap: wrap;
+      gap: 12px 28px;
+      margin-bottom: 52px;
+    }
+    .logo-chip {
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      height: 44px;
+      padding: 0 20px;
+      border: 1px solid var(--border);
+      border-radius: 8px;
+      font-size: 14px;
+      font-weight: 700;
+      color: #475569;
+      letter-spacing: .02em;
+      background: #fafafa;
+      white-space: nowrap;
+    }
+    .testimonials-row {
+      display: grid;
+      grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+      gap: 24px;
+    }
+    .testi-card {
+      background: var(--bg);
+      border: 1px solid var(--border);
+      border-radius: var(--radius);
+      padding: 28px;
+      position: relative;
+    }
+    .testi-quote {
+      font-size: 36px;
+      line-height: 1;
+      color: #E3032E;
+      margin-bottom: 12px;
+      font-family: Georgia, serif;
+    }
+    .testi-text {
+      font-size: 15px;
+      color: #334155;
+      line-height: 1.65;
+      margin-bottom: 20px;
+    }
+    .testi-author {
+      display: flex;
+      align-items: center;
+      gap: 12px;
+    }
+    .testi-avatar {
+      width: 40px;
+      height: 40px;
+      border-radius: 50%;
+      background: #E3032E;
+      color: #fff;
+      font-size: 15px;
+      font-weight: 700;
+      display: flex;
+      align-items: center;
+      justify-content: center;
+      flex-shrink: 0;
+    }
+    .testi-name { font-size: 14px; font-weight: 700; color: #0F172A; }
+    .testi-role { font-size: 12px; color: #64748b; }
+    .testi-kpi {
+      position: absolute;
+      top: 28px;
+      right: 28px;
+      background: rgba(227,3,46,0.08);
+      color: #E3032E;
+      border-radius: 6px;
+      padding: 4px 10px;
+      font-size: 13px;
+      font-weight: 800;
+    }
+    @media (max-width: 768px) {
+      .logos-row { gap: 10px 16px; }
+      .logo-chip { font-size: 12px; padding: 0 14px; height: 38px; }
+    }
+  </style>
+</head>
+<body>
+<!-- Google Tag Manager (noscript) -->
+<noscript><iframe src="https://www.googletagmanager.com/ns.html?id=GTM-MS62PKC"
+height="0" width="0" style="display:none;visibility:hidden"></iframe></noscript>
+<!-- End Google Tag Manager (noscript) -->
+
+<!-- ── NAV ──────────────────────────────────────── -->
+<nav>
+  <div class="container">
+    <div class="nav-inner">
+      <a href="#hero" class="logo">
+        <img src="assets/img/logo.png" alt="InTouch">
+      </a>
+      <ul class="nav-links">
+        <li><a href="#soluciones">Soluciones</a></li>
+        <li><a href="#modelos">Modelos</a></li>
+        <li><a href="#capacidades">Capacidades</a></li>
+        <li><a href="#analytics">Analytics</a></li>
+        <li><a href="#nosotros">Nosotros</a></li>
+        <li><a href="#contacto" class="nav-cta">Agendar consultoría</a></li>
+      </ul>
+      <button class="hamburger" id="hamburgerBtn" aria-label="Menú">
+        <span></span><span></span><span></span>
+      </button>
+    </div>
+  </div>
+</nav>
+
+<button class="drawer-close" id="drawerClose">✕</button>
+<div class="drawer" id="drawer">
+  <div class="drawer-header">
+    <img src="assets/img/logo.png" alt="InTouch" style="height:28px;">
+  </div>
+  <div class="drawer-body">
+    <nav>
+      <a href="#soluciones" class="drawer-link">Soluciones</a>
+      <a href="#modelos" class="drawer-link">Modelos</a>
+      <a href="#capacidades" class="drawer-link">Capacidades</a>
+      <a href="#analytics" class="drawer-link">Analytics</a>
+      <a href="#nosotros" class="drawer-link">Nosotros</a>
+      <a href="#contacto" class="drawer-link">Contacto</a>
+    </nav>
+  </div>
+  <div class="drawer-footer">
+    <a href="#agenda" id="drawerCta" class="btn-primary" style="display:block;text-align:center;border-radius:100px;padding:18px 32px;font-size:16px;">Agenda una consultoría</a>
+  </div>
+</div>
+
+<script>
+(function(){
+  const btn = document.getElementById('hamburgerBtn');
+  const drawer = document.getElementById('drawer');
+  const closeBtn = document.getElementById('drawerClose');
+  function openDrawer(){ drawer.classList.add('open'); closeBtn.classList.add('visible'); document.body.style.overflow='hidden'; }
+  function closeDrawer(){ drawer.classList.remove('open'); closeBtn.classList.remove('visible'); document.body.style.overflow=''; }
+  btn.addEventListener('click', openDrawer);
+  closeBtn.addEventListener('click', closeDrawer);
+  document.querySelectorAll('.drawer-link').forEach(function(l){ l.addEventListener('click', closeDrawer); });
+  document.getElementById('drawerCta').addEventListener('click', closeDrawer);
+})();
+</script>
+
+<!-- ── HERO ─────────────────────────────────────── -->
+<section id="hero" style="padding:0;margin:0;position:relative;">
+  <img src="assets/img/banner.jpg"
+       alt="Transformamos la experiencia de conectar con tus clientes — InTouch"
+       style="width:100%;height:auto;display:block;opacity:0.25;">
+  <!-- Desktop: overlay sobre imagen -->
+  <div class="hero-overlay-desktop" style="position:absolute;inset:0;display:flex;flex-direction:column;align-items:center;justify-content:flex-end;gap:20px;text-align:center;padding:32px 24px;">
+    <h1 style="font-family:'BlinkerBold',sans-serif;font-weight:900;font-size:clamp(22px,4vw,52px);color:#E3032E;line-height:1.15;text-shadow:0 2px 12px rgba(255,255,255,0.6);">
+      Transformamos la experiencia<br>de conectar con tus clientes
+    </h1>
+    <p style="font-family:'Blinker',sans-serif;font-weight:600;font-size:clamp(13px,2vw,22px);color:#0F172A;text-shadow:0 2px 8px rgba(255,255,255,0.7);max-width:600px;">
+      Integramos IA + Personas y Datos para que tu operación sea eficiente
+    </p>
+    <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;">
+      <a href="#contacto" class="btn-primary">Agenda una consultoría</a>
+      <a href="#soluciones" class="btn-secondary">Ver soluciones</a>
+    </div>
+  </div>
+  <!-- Mobile: contenido debajo imagen -->
+  <div class="hero-below-mobile" style="display:none;text-align:center;padding:40px 20px 48px;background:var(--bg);">
+    <h1 style="font-family:'BlinkerBold',sans-serif;font-weight:900;font-size:clamp(20px,5vw,52px);color:#E3032E;line-height:1.15;margin-bottom:24px;">
+      Transformamos la experiencia<br>de conectar con tus clientes
+    </h1>
+    <p style="font-family:'Blinker',sans-serif;font-weight:600;font-size:clamp(13px,2.5vw,22px);color:#0F172A;max-width:600px;margin:0 auto 36px;">
+      Integramos IA + Personas y Datos para que tu operación sea eficiente
+    </p>
+    <div style="display:flex;gap:32px;flex-wrap:wrap;justify-content:center;">
+      <a href="#agenda" class="btn-primary">Agenda una consultoría</a>
+      <a href="#soluciones" class="btn-secondary">Ver soluciones</a>
+    </div>
+  </div>
+</section>
+
+<!-- ── SOCIAL PROOF ───────────────────────────────── -->
+<!-- ── SOLUCIONES ────────────────────────────────── -->
+<section id="soluciones">
+  <div class="container">
+    <div class="section-label">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Soluciones según tu punto de partida</div>
+      <h2>No todos necesitan lo mismo,<br>pero todos <span class="grad-text">necesitan evolucionar</span></h2>
+      <p>Diseñamos arquitecturas adaptadas a tu realidad operativa, sea cual sea tu punto de partida.</p>
+    </div>
+    <div class="soluciones-grid">
+      <div class="sol-card c1">
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/sincall.jpg" alt="Empresas sin Contact Center"></div>
+        <div class="sol-body">
+          <h3>Empresas sin Contact Center</h3>
+          <p>Diseñamos tu operación desde cero con arquitectura moderna y escalable, integrando procesos, automatización y control de gestión. Nada genérico — todo a tu medida.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+      <div class="sol-card c2">
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/con-call.png" alt="Empresas con CC existente"></div>
+        <div class="sol-body">
+          <h3>Empresas con CC existente</h3>
+          <p>Integramos agentes conversacionales basados en IA para reducir costos y mejorar eficiencia sin disrupciones operativas. Evolución sin riesgo.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+      <div class="sol-card c3">
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/bot.jpeg" alt="Call Centers con IA"></div>
+        <div class="sol-body">
+          <h3>Call Centers que quieren incorporar IA</h3>
+          <p>Proveemos tecnología SaaS o Whitelabel para evolucionar hacia un modelo híbrido de mayor rentabilidad. Hacemos el trabajo de 100 con 30.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── MODELOS ────────────────────────────────────── -->
+<section id="modelos">
+  <div class="container">
+    <div class="section-label">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Modelos de Contact Center</div>
+      <h2>Elige el modelo que se adapta<br>a <span class="grad-text">tus objetivos</span></h2>
+    </div>
+    <div class="modelos-grid">
+      <div class="modelo-card">
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/callhumano.jpg" alt="Contact Center Humano"></div>
+        <div class="sol-body">
+          <h3>Contact Center Humano</h3>
+          <p>Operación 100% gestionada por agentes especializados para interacciones complejas y de alto valor. Máxima empatía, contención y personalización.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+      <div class="modelo-card featured">
+        <div class="modelo-badge">Más adoptado · 2026</div>
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/hibrido.jpg" alt="Contact Center Híbrido"></div>
+        <div class="sol-body">
+          <h3>Contact Center Híbrido</h3>
+          <p>Integración estratégica entre humanos e IA para optimizar costos y mejorar tiempos de respuesta. El equilibrio perfecto entre eficiencia y humanización.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+      <div class="modelo-card">
+        <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+        <div class="sol-img"><img src="assets/img/agentes-trabajando.jpg" alt="Contact Center Automatizado"></div>
+        <div class="sol-body">
+          <h3>Contact Center Automatizado</h3>
+          <p>Operación 100% gestionada por agentes conversacionales inteligentes. Alta eficiencia y escalabilidad para interacciones estructuradas y consultas frecuentes.</p>
+          <a href="#contacto" class="sol-link">Agendar</a>
+        </div>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── CAPACIDADES ────────────────────────────────── -->
+<section id="capacidades">
+  <div class="container">
+    <div class="cap-header">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Capacidades Estratégicas</div>
+      <h2 class="section-label" style="font-size:clamp(26px,4vw,42px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-top:12px;">Un ecosistema completo, no solo <span class="grad-text">tecnología</span></h2>
+      <p>InTouch integra experiencia operativa, tecnología conversacional avanzada y analítica estratégica para transformar la atención al cliente en una ventaja competitiva sostenible.</p>
+    </div>
+    <div class="tech-carousel-wrap">
+      <div class="tech-grid" id="techGrid">
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/amedida.jpg" alt="A medida"></div>
+          <div class="sol-body">
+            <h3>A medida</h3>
+            <p>Diseño de arquitectura operativa diseñada según sus necesidades.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/bot-ok.jpg" alt="Automatización"></div>
+          <div class="sol-body">
+            <h3>Automatización</h3>
+            <p>Desarrollo de agentes conversacionales con IA e integrados a sus procesos de negocio.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/ai.jpg" alt="Motor NLP"></div>
+          <div class="sol-body">
+            <h3>Motor NLP Avanzado</h3>
+            <p>Comprensión de lenguaje natural para interacciones fluidas y contextuales.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/omnichannel.jpg" alt="Omnicanal"></div>
+          <div class="sol-body">
+            <h3>Integración Omnicanal</h3>
+            <p>Voz, WhatsApp, chat, email, RRSS — todo conectado bajo un mismo protocolo.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/tiemporeal.jpg" alt="Panel Tiempo Real"></div>
+          <div class="sol-body">
+            <h3>Panel en Tiempo Real</h3>
+            <p>Supervisión live de todos los canales y agentes en un dashboard unificado.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/analitica.jpg" alt="Analytics"></div>
+          <div class="sol-body">
+            <h3>Analytics Avanzada</h3>
+            <p>Reportes ejecutivos con KPIs estratégicos e indicadores de experiencia (CSAT, NPS).</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/security.jpg" alt="Seguridad"></div>
+          <div class="sol-body">
+            <h3>Seguridad & Compliance</h3>
+            <p>Protocolos de seguridad y cumplimiento normativo, incluyendo Ley de Datos.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+        <div class="modelo-card">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="15" ry="15" pathLength="100"/></svg>
+          <div class="sol-img"><img src="assets/img/integraciones.jpg" alt="CRM ERP"></div>
+          <div class="sol-body">
+            <h3>Integraciones CRM/ERP</h3>
+            <p>Conexión nativa con los principales CRMs y sistemas de gestión del mercado.</p>
+            <a href="#contacto" class="sol-link">Agendar</a>
+          </div>
+        </div>
+
+      </div>
+    </div>
+    <div class="tech-nav">
+      <button class="tech-btn" id="techPrev">&#8592;</button>
+      <!-- Desktop: 3 puntos -->
+      <div class="tech-dots dots-desktop">
+        <div class="tech-dot active" onclick="techGo(0)"></div>
+        <div class="tech-dot" onclick="techGo(1)"></div>
+        <div class="tech-dot" onclick="techGo(2)"></div>
+      </div>
+      <!-- Mobile: 8 puntos -->
+      <div class="tech-dots dots-mobile">
+        <div class="tech-dot active" onclick="techGo(0)"></div>
+        <div class="tech-dot" onclick="techGo(1)"></div>
+        <div class="tech-dot" onclick="techGo(2)"></div>
+        <div class="tech-dot" onclick="techGo(3)"></div>
+        <div class="tech-dot" onclick="techGo(4)"></div>
+        <div class="tech-dot" onclick="techGo(5)"></div>
+        <div class="tech-dot" onclick="techGo(6)"></div>
+        <div class="tech-dot" onclick="techGo(7)"></div>
+      </div>
+      <button class="tech-btn" id="techNext">&#8594;</button>
+    </div>
+    </div>
+  </div>
+</section>
+
+<script>
+  (function(){
+    const grid = document.getElementById('techGrid');
+    const dotsDesktop = document.querySelectorAll('.dots-desktop .tech-dot');
+    const dotsMobile = document.querySelectorAll('.dots-mobile .tech-dot');
+    let current = 0;
+    function techGo(n) {
+      const isMobile = window.innerWidth <= 768;
+      const total = isMobile ? 8 : 3;
+      current = (n + total) % total;
+      const gap = isMobile ? 0 : 24;
+      const itemW = grid.children[0].offsetWidth + gap;
+      let offset;
+      if (isMobile) {
+        offset = current * itemW;
+        dotsMobile.forEach((d,i) => d.classList.toggle('active', i === current));
+      } else {
+        const maxOffset = (grid.children.length - 3) * itemW;
+        offset = Math.min(current * 3 * itemW, maxOffset);
+        dotsDesktop.forEach((d,i) => d.classList.toggle('active', i === current));
+      }
+      grid.style.transform = 'translateX(-' + offset + 'px)';
+    }
+    window.techGo = techGo;
+    document.getElementById('techPrev').onclick = () => techGo(current - 1);
+    document.getElementById('techNext').onclick = () => techGo(current + 1);
+  })();
+</script>
+
+<!-- ── ANALYTICS ─────────────────────────────────── -->
+<section id="analytics">
+  <div class="container">
+    <div class="cap-header">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Reportería & Analytics</div>
+      <h2 style="font-size:clamp(26px,4vw,42px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-top:12px;">Nuestra reportería está orientada <span class="grad-text">directamente al ROI</span></h2>
+      <p style="color:var(--text2);font-size:16px;margin-top:16px;max-width:700px;margin-left:auto;margin-right:auto;">Transformamos cada interacción en datos vivos. A través de dashboards en Power BI te entregamos insights profundos para que tomes decisiones estratégicas, no solo operativas.</p>
+    </div>
+    <div class="analytics-layout">
+      <div class="analytics-visual">
+        <div style="font-size:12px; font-weight:900; color:#0F172A; letter-spacing:.06em; text-transform:uppercase; margin-bottom:20px;">Dashboard · Tiempo Real</div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-header"><span>Tasa de resolución IA</span><span>83%</span></div>
+          <div class="kpi-track"><div class="kpi-fill" style="--target-width:83%"></div></div>
+        </div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-header"><span>Satisfacción del cliente (CSAT)</span><span>91%</span></div>
+          <div class="kpi-track"><div class="kpi-fill" style="--target-width:91%"></div></div>
+        </div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-header"><span>Reducción de costos operativos</span><span>67%</span></div>
+          <div class="kpi-track"><div class="kpi-fill" style="--target-width:67%"></div></div>
+        </div>
+        <div class="kpi-bar">
+          <div class="kpi-bar-header"><span>NPS Score</span><span>+72</span></div>
+          <div class="kpi-track"><div class="kpi-fill" style="--target-width:78%"></div></div>
+        </div>
+        <div style="font-size:11px;color:#94a3b8;margin-top:12px;line-height:1.5;">* Métricas promedio medidas en clientes activos del sector automotriz e industrial — período 2022–2024.</div>
+        <div class="kpi-numbers">
+          <div class="kpi-num">
+            <div class="val" data-target="1000000" data-suffix="M+" data-divisor="1000000">1M+</div>
+            <div class="lbl">Llamadas / mes</div>
+          </div>
+          <div class="kpi-num">
+            <div class="val" data-target="30" data-prefix="+">+30</div>
+            <div class="lbl">Clientes activos</div>
+          </div>
+          <div class="kpi-num">
+            <div class="val" data-target="18">18</div>
+            <div class="lbl">Años experiencia</div>
+          </div>
+        </div>
+      </div>
+      <div class="analytics-text" style="background:#fff;border:1px solid var(--border);border-radius:var(--radius);padding:32px;">
+        <div style="font-size:clamp(18px,2vw,24px);font-weight:900;color:#0F172A;margin-bottom:16px;">Orientado al Negocio</div>
+        <p>El impacto financiero medible y sostenido es el único resultado que nos importa.</p>
+        <ul class="cap-list" style="margin-top:24px;">
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>Dashboards en tiempo real</span></li>
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>KPIs estratégicos</span></li>
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>Analítica conversacional</span></li>
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>CSAT & NPS</span></li>
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>Reportes ejecutivos</span></li>
+          <li><span class="cap-check" style="background:transparent;border:none;color:#E3032E;font-size:16px;">✓</span><span>Power BI integrado</span></li>
+        </ul>
+      </div>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  const observer = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(!entry.isIntersecting) return;
+      // Animate bars
+      entry.target.querySelectorAll('.kpi-fill').forEach(function(bar, i){
+        setTimeout(function(){ bar.classList.add('animated'); }, i * 200);
+      });
+      // Animate counters
+      entry.target.querySelectorAll('.val[data-target]').forEach(function(el, i){
+        const target = +el.dataset.target;
+        const prefix = el.dataset.prefix || '';
+        const suffix = el.dataset.suffix || '';
+        const divisor = +(el.dataset.divisor || 1);
+        const duration = 1800;
+        const steps = 60;
+        let step = 0;
+        el.textContent = prefix + '0' + suffix;
+        setTimeout(function(){
+          const timer = setInterval(function(){
+            step++;
+            const progress = step / steps;
+            const eased = 1 - Math.pow(1 - progress, 3);
+            const val = Math.round(target * eased / divisor);
+            el.textContent = prefix + val + suffix;
+            if(step >= steps){ el.textContent = prefix + Math.round(target/divisor) + suffix; clearInterval(timer); }
+          }, duration / steps);
+        }, i * 150);
+      });
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.3 });
+  const analyticsSection = document.getElementById('analytics');
+  if(analyticsSection) observer.observe(analyticsSection);
+})();
+</script>
+
+<!-- ── NOSOTROS ───────────────────────────────────── -->
+<section id="nosotros">
+  <div class="container">
+    <div class="cap-header">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Sobre InTouch</div>
+      <h2 style="font-size:clamp(26px,4vw,42px);font-weight:800;letter-spacing:-.02em;line-height:1.15;margin-top:12px;">Especialistas en ecosistemas inteligentes de <span class="grad-text">atención al cliente</span></h2>
+    </div>
+    <div class="nosotros-layout">
+      <div class="nosotros-text">
+        <p>Con una exitosa trayectoria en el mercado automotriz chileno y peruano, InTouch ha evolucionado hacia nuevos mercados que requieren servicios de customer experience, abarcando los sectores industrial, inmobiliario, retail y servicios.</p>
+        <p>Integramos operación humana, inteligencia artificial y analítica estratégica para transformar la atención al cliente en una ventaja competitiva sostenible.</p>
+      </div>
+      <div class="cifras-grid">
+        <div class="cifra-box">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="13" ry="13" pathLength="100"/></svg>
+          <div class="num" data-target="18">18</div>
+          <p>Años de experiencia en Contact Center</p>
+        </div>
+        <div class="cifra-box">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="13" ry="13" pathLength="100"/></svg>
+          <div class="num" data-target="300" data-prefix="+">+300</div>
+          <p>Colaboradores especializados</p>
+        </div>
+        <div class="cifra-box">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="13" ry="13" pathLength="100"/></svg>
+          <div class="num" data-target="30" data-prefix="+">+30</div>
+          <p>Clientes confían en nosotros</p>
+        </div>
+        <div class="cifra-box">
+          <svg class="card-border-svg"><rect x="1" y="1" width="99%" height="99%" rx="13" ry="13" pathLength="100"/></svg>
+          <div class="num" data-target="1000000" data-suffix="M+" data-divisor="1000000">1M+</div>
+          <p>Llamadas gestionadas mensualmente</p>
+        </div>
+      </div>
+    </div>
+    <div style="text-align:center;margin-top:40px;">
+      <a href="#agenda" class="btn-primary">Agenda una consultoría</a>
+    </div>
+  </div>
+</section>
+
+<script>
+(function(){
+  const observer = new IntersectionObserver(function(entries){
+    entries.forEach(function(entry){
+      if(!entry.isIntersecting) return;
+      const boxes = entry.target.querySelectorAll('.cifra-box');
+      boxes.forEach(function(box, i){
+        setTimeout(function(){
+          box.classList.add('visible');
+          const el = box.querySelector('.num[data-target]');
+          if(!el) return;
+          const target = +el.dataset.target;
+          const prefix = el.dataset.prefix || '';
+          const suffix = el.dataset.suffix || '';
+          const divisor = +(el.dataset.divisor || 1);
+          el.textContent = prefix + '0' + suffix;
+          const duration = 1600, steps = 60;
+          let step = 0;
+          const timer = setInterval(function(){
+            step++;
+            const eased = 1 - Math.pow(1 - step/steps, 3);
+            const val = Math.round(target * eased / divisor);
+            el.textContent = prefix + val + suffix;
+            if(step >= steps){ el.textContent = prefix + Math.round(target/divisor) + suffix; clearInterval(timer); }
+          }, duration / steps);
+        }, i * 150);
+      });
+      observer.unobserve(entry.target);
+    });
+  }, { threshold: 0.3 });
+  const s = document.getElementById('nosotros');
+  if(s) observer.observe(s);
+})();
+</script>
+
+<!-- ── CONTACTO ───────────────────────────────────── -->
+<section id="contacto">
+  <div class="container" style="position:relative;">
+    <div class="contacto-layout">
+      <div class="contacto-info">
+        <div class="tag">Contacto</div>
+        <h2>Descubre qué arquitectura se adapta a tu <span class="grad-text">organización</span></h2>
+        <p>Agenda una consultoría estratégica gratuita. En 30 minutos analizamos tu situación y te mostramos el modelo exacto que necesitas.</p>
+        <ul class="contacto-bullets">
+          <li><span class="dot"></span>Sin compromiso, 100% estratégico</li>
+          <li><span class="dot"></span>Diagnóstico de tu contactabilidad actual</li>
+          <li><span class="dot"></span>Propuesta de arquitectura a medida</li>
+          <li><span class="dot"></span>Estimación de ROI y ahorro proyectado</li>
+        </ul>
+        <div style="margin-top:40px; padding-top:32px; border-top:1px solid var(--border);">
+          <div style="font-size:11px; color:#E3032E; margin-bottom:16px; font-weight:700; letter-spacing:.08em; text-transform:uppercase;">Presencia regional</div>
+          <div style="display:flex; gap:16px; flex-wrap:wrap;">
+            <div style="flex:1; min-width:160px; background:#FFF0F0; border:1px solid rgba(220,31,38,0.2); border-radius:12px; padding:18px 20px;">
+              <div style="font-size:22px; margin-bottom:8px;">🇨🇱</div>
+              <div style="font-size:15px; font-weight:700; color:#0F172A; margin-bottom:4px;">Chile</div>
+              <div style="font-size:13px; color:#475569; line-height:1.5;">Av. Irarrázaval 2470<br>Ñuñoa, Santiago</div>
+            </div>
+            <div style="flex:1; min-width:160px; background:#FFF0F0; border:1px solid rgba(220,31,38,0.2); border-radius:12px; padding:18px 20px;">
+              <div style="font-size:22px; margin-bottom:8px;">🇵🇪</div>
+              <div style="font-size:15px; font-weight:700; color:#0F172A; margin-bottom:4px;">Perú</div>
+              <div style="font-size:13px; color:#475569; line-height:1.5;">Lima, Perú</div>
+            </div>
+          </div>
+        </div>
+      </div>
+      <div class="form-card">
+        <h3>Agenda tu consultoría</h3>
+		<form action='/gracias' method='POST' name='sitiointouch.netlify.app'>							 	
+          <input type="hidden" name="form-name" value="sitiointouch.netlify.app">
+          <div class="form-row">
+            <div class="form-group"><label>Nombre completo</label><input type="text" name="nombre" placeholder="Tu nombre" required></div>
+            <div class="form-group"><label>Empresa</label><input type="text" name="empresa" placeholder="Nombre de tu empresa" required></div>
+          </div>
+          <div class="form-row">
+            <div class="form-group"><label>Correo corporativo</label><input type="email" name="email" placeholder="tu@empresa.com" required></div>
+            <div class="form-group"><label>Teléfono</label><input type="tel" name="telefono" placeholder="XXXXXXXXX" pattern="[0-9]{9}" maxlength="9" title="Ingresa 9 dígitos sin espacios ni guiones"></div>
+          </div>
+          <div class="form-group">
+            <label>¿Cuál es tu situación actual?</label>
+            <select name="situacion">
+              <option value="">Selecciona una opción</option>
+              <option value="sin-cc">No tengo Contact Center</option>
+              <option value="cc-existente">Tengo CC y quiero mejorar costos</option>
+              <option value="quiero-ia">Quiero incorporar IA a mi CC</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          <div class="form-group"><label>Mensaje (opcional)</label><textarea name="mensaje" placeholder="Cuéntanos brevemente sobre tu operación actual..."></textarea></div>
+          <button type="submit" class="form-submit">Agendar consultoría →</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<!-- ── AGENDA ─────────────────────────────────────── -->
+<section id="agenda">
+  <div class="container">
+    <div class="cap-header">
+      <div class="tag" style="color:#E3032E;font-weight:900;font-size:clamp(26px,4vw,42px);border:none;background:none;padding:0;letter-spacing:-.02em;line-height:1.15;">Agenda tu Consultoría</div>
+    </div>
+    <div style="max-width:620px;margin:0 auto;">
+      <div class="form-card">
+		<form action='/gracias' method='POST' name='sitiointouch.netlify.app'>							 	
+          <input type="hidden" name="form-name" value="contacto">
+          <div class="form-row">
+            <div class="form-group">
+              <label>Nombre completo</label>
+              <input type="text" name="nombre" placeholder="Tu nombre" required>
+            </div>
+            <div class="form-group">
+              <label>Empresa</label>
+              <input type="text" name="empresa" placeholder="Nombre de tu empresa" required>
+            </div>
+          </div>
+          <div class="form-row">
+            <div class="form-group">
+              <label>Correo corporativo</label>
+              <input type="email" name="email" placeholder="tu@empresa.com" required>
+            </div>
+            <div class="form-group">
+              <label>Teléfono</label>
+              <input type="tel" name="telefono" placeholder="XXXXXXXXX" pattern="[0-9]{9}" maxlength="9" title="Ingresa 9 dígitos sin espacios ni guiones">
+            </div>
+          </div>
+          <div class="form-group">
+            <label>¿Cuál es tu situación actual?</label>
+            <select name="situacion">
+              <option value="">Selecciona una opción</option>
+              <option value="sin-cc">No tengo Contact Center</option>
+              <option value="cc-existente">Tengo CC y quiero mejorar costos</option>
+              <option value="quiero-ia">Quiero incorporar IA a mi CC</option>
+              <option value="otro">Otro</option>
+            </select>
+          </div>
+          <div class="form-group">
+            <label>Mensaje (opcional)</label>
+            <textarea name="mensaje" placeholder="Cuéntanos brevemente sobre tu operación actual..."></textarea>
+          </div>
+          <button type="submit" class="form-submit">Agendar consultoría →</button>
+        </form>
+      </div>
+    </div>
+  </div>
+</section>
+
+<a href="#hero" id="backToTop" title="Volver arriba" style="
+  position:fixed;
+  bottom:28px;
+  right:28px;
+  width:44px;
+  height:44px;
+  background:#E3032E;
+  color:#fff;
+  border-radius:50%;
+  display:none;
+  align-items:center;
+  justify-content:center;
+  font-size:20px;
+  text-decoration:none;
+  box-shadow:0 4px 12px rgba(228,3,47,0.4);
+  z-index:900;
+  transition:opacity .3s;
+">↑</a>
+
+<script>
+(function(){
+  const btn = document.getElementById('backToTop');
+  window.addEventListener('scroll', function(){
+    btn.style.display = window.scrollY > 400 ? 'flex' : 'none';
+  });
+})();
+</script>
+
+<!-- ── FOOTER ─────────────────────────────────────── -->
+<footer>
+  <div class="container">
+    <div class="footer-inner">
+      <a href="#hero" class="logo">
+        <img src="assets/img/logo.png" alt="InTouch" style="height:34px;">
+      </a>
+      <ul class="footer-links">
+        <li><a href="#soluciones">Soluciones</a></li>
+        <li><a href="#modelos">Modelos</a></li>
+        <li><a href="#analytics">Analytics</a></li>
+        <li><a href="#contacto">Contacto</a></li>
+      </ul>
+      <div style="font-size:13px;color:var(--text2);line-height:1.8;">
+        <div style="font-weight:700;color:#0F172A;margin-bottom:4px;">Recursos Humanos</div>
+        <a href="/cdn-cgi/l/email-protection#601212080820090e4d140f15030803120d4e030c" style="color:var(--text2);text-decoration:none;display:block;"><span class="__cf_email__" data-cfemail="beccccd6d6fed7d093cad1cbddd6ddccd390ddd2">[email&#160;protected]</span></a>
+        <a href="tel:+56229273619" style="color:var(--text2);text-decoration:none;display:block;">+56 2 2927 3619</a>
+      </div>
+      <small>© 2026 InTouch. Todos los derechos reservados.</small>
+    </div>
+  </div>
+</footer>
+
+
+<script data-cfasync="false" src="/cdn-cgi/scripts/5c5dd728/cloudflare-static/email-decode.min.js"></script><script>
+/* ── FORM → JSON ENDPOINT + UTM CAPTURE ─────────────────── */
+(function(){
+  var ENDPOINT = '/.netlify/functions/submit';
+  var UTM_KEYS = ['utm_source','utm_medium','utm_campaign','utm_term','gclid','fbclid'];
+
+  // Guardar UTMs en sessionStorage al cargar la página
+  (function saveUTMs(){
+    var params = new URLSearchParams(window.location.search);
+    UTM_KEYS.forEach(function(k){
+      var v = params.get(k);
+      if(v) sessionStorage.setItem('it_' + k, v);
+    });
+  })();
+
+  function getUTMs(){
+    var obj = {};
+    UTM_KEYS.forEach(function(k){
+      obj[k] = sessionStorage.getItem('it_' + k) || '';
+    });
+    return obj;
+  }
+
+  function handleSubmit(e){
+    e.preventDefault();
+    var form = e.target;
+    var btn  = form.querySelector('[type="submit"]');
+    if(btn){ btn.disabled = true; btn.textContent = 'Enviando...'; }
+
+    var formData = new FormData(form);
+
+    // Datos planos del formulario
+    var data = {};
+    formData.forEach(function(v, k){ data[k] = v; });
+
+    // Payload JSON con UTMs
+    var payload = Object.assign({}, data, getUTMs(), {
+      page_url:  window.location.href,
+      timestamp: new Date().toISOString()
+    });
+
+    // 1) Netlify Forms — necesita x-www-form-urlencoded con form-name
+    var encoded = new URLSearchParams();
+    Object.keys(payload).forEach(function(k){ encoded.append(k, payload[k]); });
+    var netlifyPost = fetch('/', {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/x-www-form-urlencoded' },
+      body:    encoded.toString()
+    });
+
+    // 2) Cloud Run — JSON via proxy function
+    var endpointPost = fetch(ENDPOINT, {
+      method:  'POST',
+      headers: { 'Content-Type': 'application/json' },
+      body:    JSON.stringify(payload)
+    });
+
+    Promise.allSettled([netlifyPost, endpointPost]).then(function(){
+      window.location.href = '/gracias.html';
+    });
+  }
+
+  // Aplicar a todos los formularios del sitio
+  document.querySelectorAll('form').forEach(function(form){
+    form.addEventListener('submit', handleSubmit);
+  });
+})();
+</script>
+
+</body>
+</html>

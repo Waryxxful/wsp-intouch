@@ -7,7 +7,7 @@ from django.utils import timezone
 from bot.models import ScrapedPage, ScrapeRun, ScrapingSource, Servicio, Sucursal, VehiculoCatalogo
 
 from .crawler import crawl
-from .extractor import extract_catalog, _normalizar_clave
+from .extractor import catalogo_estructurado_disponible, extract_catalog, _normalizar_clave
 from .normalizar import _normalizar_direccion
 from bot.rag.indexador import borrar_chunks_de_paginas_purgadas, indexar_pagina_en_supabase
 
@@ -131,13 +131,19 @@ def execute_scrape(run: ScrapeRun) -> None:
             indexar_pagina_en_supabase(pagina, cliente=cliente)
         run.paginas_procesadas = len(paginas)
         run.paginas_con_error = errores
-        catalogo = extract_catalog(paginas)
-        run.catalogo_extraido = catalogo
-        _upsert_catalogo(
-            catalogo, cliente=cliente, estructurados=estructurados_sucursales,
-            fichas_tecnicas=fichas_tecnicas_por_pagina,
-            datos_seminuevos=datos_seminuevos_por_nombre,
-        )
+        # Sin catálogo estructurado para este vertical, el scrapeo termina
+        # acá: las páginas ya quedaron indexadas en el RAG, que es todo lo que
+        # el vertical usa. Antes se llamaba igual a extract_catalog, que
+        # levantaba NotImplementedError DESPUÉS de indexar, y el run quedaba en
+        # "error" sobre algo que había funcionado (run 2, in-touch.cl).
+        if catalogo_estructurado_disponible():
+            catalogo = extract_catalog(paginas)
+            run.catalogo_extraido = catalogo
+            _upsert_catalogo(
+                catalogo, cliente=cliente, estructurados=estructurados_sucursales,
+                fichas_tecnicas=fichas_tecnicas_por_pagina,
+                datos_seminuevos=datos_seminuevos_por_nombre,
+            )
         run.estado = "ok"
     except Exception as exc:
         logger.warning("[scraping] run %s fallo: %s", run.pk, exc)

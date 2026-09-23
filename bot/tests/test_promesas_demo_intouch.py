@@ -71,8 +71,32 @@ class ReglasDePromptTest(SimpleTestCase):
             self.assertIn("no queda agendado, el equipo te confirma", texto, nombre)
             self.assertIn("bloque de horario del turno", texto, nombre)
             self.assertIn("texto de consentimiento entre marcas", texto, nombre)
-            self.assertIn("ficha firmada", texto, nombre)
             self.assertIn(FORMULA_DEL_CASO, texto, nombre)
+
+    def test_clientes_y_trayectoria_siguen_la_regla_del_gerente_comercial(self):
+        # Regla del gerente comercial (2026-09-23), tras el chat 9: el bot no
+        # da nombres de clientes ("No nombres clientes" se leía como imperativo
+        # y el modelo lo imitó: "no nombre clientes"). Según la industria del
+        # contacto, habla de la trayectoria en general.
+        #
+        # nombra clientes; habla de la trayectoria en general según la
+        # industria del contacto. Las cifras que publica in-touch.cl sí se
+        # pueden citar si las trae la base de conocimiento, con su aclaración.
+        # Reemplaza a "todavía no hay una ficha firmada", que dejaba al bot
+        # sin poder decir ni los años de experiencia que están en el sitio.
+        from bot.flow.global_prompt import SYSTEM_PROMPT
+
+        fixture = FIXTURE.read_text(encoding="utf-8")
+        for nombre, crudo in (("fixture", fixture), ("global", SYSTEM_PROMPT)):
+            texto = " ".join(crudo.split())
+            self.assertNotIn("ficha firmada", texto, nombre)
+            self.assertIn("Nunca des nombres de clientes de InTouch", texto, nombre)
+            self.assertIn("InTouch es líder en la industria automotriz", texto, nombre)
+            self.assertIn(
+                "presencia y experiencia en la industria automotriz, en empresas "
+                "privadas y corporativas, y en entidades públicas", texto, nombre)
+            self.assertIn("consultar_base_conocimiento", texto, nombre)
+            self.assertIn("clientes activos del sector automotriz e industrial", texto, nombre)
 
 
 class NotificarCasoNuevoTest(TestCase):

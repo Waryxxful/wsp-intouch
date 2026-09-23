@@ -4,8 +4,10 @@ __pycache__/
 *.egg-info/
 dist/
 build/
-.env
-.env.docker
+# Cualquier .env y sus respaldos (.env.docker.bak-*) llevan secretos reales.
+# Solo se versiona la plantilla .example, con credenciales en CHANGEME.
+.env*
+!.env*.example
 dios.json
 !dios.json.example
 db.sqlite3

@@ -483,3 +483,83 @@ Dónde quedó escrito:
 Nada de esta sesión está commiteado. En disco sí: sobrevive al apagado. El
 código que corre es el del working tree (ficha en `bot/flow/contexto_turno.py`,
 corte en `bot/whatsapp/handlers.py`, workers recargados a las 18:57 UTC).
+
+## 2026-09-23 — Chat 9 del gerente comercial: el sitio entra, los contactos van a la ficha, la regla de clientes
+
+Felipe, gerente comercial, probó el bot en el chat 9: 38 turnos, con una
+campaña de renovación (2.000) y fidelización (3.000) para «AutoCar». El bot
+respondió «no tengo ese dato confirmado» nueve veces. Le preguntaron el
+teléfono, el correo, la dirección, los clientes y las cifras. Tiempo por turno,
+de mensaje guardado a respuesta guardada: media 3,7 s, p50 2,8 s, p90 6,8 s,
+máximo 11,8 s (los lentos fueron los de RAG).
+
+### Por qué no sabía
+
+in-touch.cl nunca se había scrapeado: la única fuente eran los siete `.md`.
+Cuando el usuario lo scrapeó desde el panel, el run quedó en «error» aunque ya
+había indexado 21 fragmentos: `extract_catalog` levantaba NotImplementedError
+DESPUÉS de indexar. Y el crawler perdía justo lo que se preguntó:
+
+- Solo leía `p/li/table/h1-3`. La dirección, las cifras y los KPIs estaban en
+  `<div>`. El resto de la página superaba el piso de cobertura del 50 %, así
+  que el fallback a texto plano no se activaba: se perdían sin aviso.
+- Borraba el `<footer>` entero, que es donde están el teléfono y el correo.
+- El correo estaba ofuscado por Cloudflare («[email protected]»).
+
+Con eso arreglado, los datos quedaron en el RAG, **pero la búsqueda no los
+encontraba**. «¿Cuál es el teléfono?» no traía el fragmento entre los 20
+candidatos: no dice «teléfono». «¿Dónde están?» lo tenía en el puesto 2 y el
+rerank lo descartaba, porque la dirección iba dentro del fragmento de la
+consultoría. Un dato fijo y corto no puede depender del ranking.
+
+### Qué se hizo
+
+| Commit | Qué |
+|---|---|
+| `0232ac4` | Crawler: bloques hoja (salvo dentro de `<form>`), rescate del pie con `tel:`/`mailto:`, correos de Cloudflare, dedup por párrafo. El run termina en «ok» |
+| `ded886e` | El trabajo sin commitear del 22-09 (ficha corta, corte a 6 líneas, tarjeta del panel), commiteado con autorización del usuario. Se actualizó la prueba heredada que esperaba una burbuja por párrafo |
+| `51600fd` | `ContactoInstitucional` (migración 0043, aplicada en producción): teléfonos y correos salen de los enlaces sin LLM; las direcciones las lee un LLM y el código descarta cualquiera que no esté escrita en la página. Van a la ficha de cada turno con su rótulo. `doctor` falla si no hay |
+| `c246b61` | Regla de clientes del gerente comercial, publicada (PromptVersion global 7, comercial 8) |
+| docs-repo `a9a2d76` | Biblia §VI.5: el paso hecho y las dos lecciones del crawler |
+
+La regla de clientes, en palabras de Felipe: el bot no da nombres; si el
+contacto es automotriz, InTouch «es líder en la industria automotriz»; si es de
+otra industria, «tiene presencia y experiencia en la industria automotriz, en
+empresas privadas y corporativas, y en entidades públicas». Se quitó «todavía
+no hay una ficha firmada», que impedía decir hasta los 18 años del sitio. Las
+cifras del sitio se citan si las trae la base de conocimiento; las métricas,
+siempre con su aclaración (promedios en clientes automotrices e industriales,
+2022-2024).
+
+### Verificación
+
+- Suite: 1996 tests en la última corrida completa, en verde tras actualizar la
+  prueba heredada del corte.
+- Direcciones contra el LLM real con el texto del sitio: 3 de 3 exactas, sin
+  inventar.
+- Prompt validado ANTES de publicar, con `override_prompts`, en un contenedor
+  aparte (`LEAD_SINK=none`, WhatsApp y notify mockeados, Langfuse apagado). Nueve
+  conversaciones TEST, borradas después junto con su Incident. El bot da el
+  teléfono «como el de Recursos Humanos», las dos direcciones, las cifras con
+  su aclaración y los clientes en términos generales.
+- Scrapeo real (run 4): 4 contactos en la tabla. `doctor`: prompts activos =
+  git.
+
+### Tres cosas que esta sesión aprendió
+
+1. **Que el dato esté en el RAG no significa que el bot lo encuentre.** Se mide
+   la búsqueda con la pregunta real del contacto, no con `SELECT` a los chunks.
+2. **«No nombres clientes» salió como «no nombre clientes».** El modelo imitó el
+   imperativo. Con «Nunca des nombres de clientes» respondió «No compartimos
+   nombres de clientes». Solo se vio corriendo el LLM real.
+3. **Un `grep -v "dios"` para limpiar logs escondió «promedios».** Pareció un
+   turno sin respuesta y era un filtro. Antes de diagnosticar un silencio, mirar
+   la salida sin filtrar.
+
+### Lo que queda
+
+En `PENDIENTES.md`, sección «RETOMAR ACÁ»: la derivación y el CRM (el lead no
+llegó, el notify dio 404, el score se degrada), el extractor, el comportamiento
+del prompt (consultoría gratuita, implementación ≠ plazo, consentimiento,
+saludo, nombre), las listas corridas del corte y el contacto comercial que
+falta en el sitio.

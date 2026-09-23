@@ -1,7 +1,92 @@
 # Pendientes — wsp_intouch
 
 Estado al **2026-09-10 12:55 UTC**, verificado contra el sistema corriendo (no
-de memoria). Cada afirmación dice cómo se comprobó.
+de memoria). Cada afirmación dice cómo se comprobó. **Actualizado el
+2026-09-23**: lo abierto de esa fecha está en la sección siguiente.
+
+---
+
+## RETOMAR ACÁ — chat 9 del gerente comercial (2026-09-23)
+
+Felipe (gerente comercial) probó el bot en el chat 9 del panel
+(`/wsp/intouch/chat/9`, wa_id 56996249863, 38 turnos). Lo hecho está en
+`hilo.md` del 2026-09-23. Lo que queda abierto, por prioridad:
+
+### A. Derivación y CRM — el usuario lo dejó para después (era una prueba)
+
+1. **El lead nunca llegó al CRM.** 20 rechazos con 400; `despachado_en` vacío.
+   El cuerpo del 400 no se loguea (`bot/business/lead_intouch.py:498`), así que
+   no se sabe el motivo. Primer paso: loguear el cuerpo.
+2. **El aviso de derivación dio 404.** `[notify] no se pudo notificar
+   caso_equipo a http://172.20.21.249:9000/internal/notify/`. El Incident 6
+   quedó abierto sin que nadie se enterara. El bot prometió seis veces "te
+   contacta hoy a las 17:00".
+3. **El score se degrada.** Llegó a HOT a las 12:45 UTC y terminó en
+   `NO_CALIFICADO`: un turno con señales en contra lo recalcula a la baja
+   (`lead_intouch.py:188-190`; el guard solo cubre los turnos SIN señales).
+   Tiene que ser monótono dentro de la conversación.
+4. **`doctor` debería fallar** si el receptor del lead o el notify no
+   responden, en vez de descubrirlo en una conversación.
+
+### B. Extractor de metadatos
+
+- `resumen_conversacion` y `necesidad_principal` describen el último turno
+  («servicios más vendidos»), no el caso. `soluciones_interes` trae frases que
+  no son soluciones. `canales_actuales` perdió «voz». No quedó la secuencia
+  «WhatsApp primero, después llamada».
+- `flow_data` acumula claves basura (`mensaje`, `contacto_turno`, `fecha_hoy`,
+  `mensaje_clave`, `prefijo_horario`, `correo` y `email` duplicados):
+  `normalizar_flow_data` no filtra contra una lista de campos conocidos.
+- 4 timeouts de 8,5 s en el chat 9: esos turnos quedaron sin clasificar.
+
+### C. Comportamiento del bot (prompt)
+
+- No ofrece la **consultoría gratuita de 30 minutos**, que es el llamado
+  principal del sitio (ya está en el RAG). Ni siquiera cuando le piden precio.
+- Confunde «proceso de implementación» con «plazo» (mensaje 266). Las etapas
+  se pueden explicar con `sobre-intouch.md`.
+- Se contradice con el consentimiento (276 explica la ley, 278 dice que no
+  tiene el detalle).
+- Vuelve a saludar a mitad de conversación; repite el cierre «hoy a las 17:00,
+  no queda agendado» seis turnos seguidos; inventó una «campaña anterior» (256).
+- **Nombre del bot: falta la decisión del gerente.** Se negó a tener uno y
+  después eligió «Matías»; Felipe se despidió de «Matías».
+- Detalles vistos al validar la regla de clientes: a veces justifica con «es
+  información confidencial» (no autorizado, pero plausible), y con la
+  industria desconocida una vez usó «líder en automotriz» en vez de la versión
+  general.
+
+### D. Corte de mensajes (`ded886e`, trabajo del 22-09)
+
+`_empaquetar_sin_cortar` une las unidades con un espacio: se pierden los saltos
+de párrafo y **una lista llega corrida en una línea** («- Tasa 83% - CSAT
+91% - …», visto en la respuesta de métricas). Las pruebas del 22-09 esperan ese
+comportamiento; cambiarlo es cambiar ese contrato.
+
+### E. Datos que dependen del gerente
+
+- El único teléfono y el único correo publicados en in-touch.cl están bajo
+  **«Recursos Humanos»** (+56 2 2927 3619, rrhh@in-touchcrm.cl). El bot los da
+  con ese rótulo. Si hay un contacto comercial, se publica en el sitio y se
+  vuelve a scrapear: `ContactoInstitucional` lo toma solo.
+
+### F. Menores
+
+- El acuse de las 13:11:51 UTC quedó guardado como mensaje con el texto
+  literal «None» (llega por `/internal/webhook`).
+- Dos turnos de RAG tardaron 11,8 s y 10,1 s (mensajes 269 y 277), cuando lo
+  esperable es ~7 s: mirarlos en Langfuse.
+- La solución de contactos no es universal: la decisión es
+  `CLIENTE_ACTIVO != "intouch"` en `catalogo_estructurado_disponible()`. La
+  versión universal es el paquete `verticals/` (biblia §VI.5).
+
+### Lo que NO es de esta sesión y quedó sin commitear
+
+- `auditoria latencia/`: los `.md` movidos a `hecho/`, el xlsx y
+  `scripts/propuestasprompt/`. Ninguna de las otras sesiones de Claude los
+  reconoce como suyos.
+- `docs-repo/biblia_bots.md`: ~180 líneas de otra sesión (de esta sesión se
+  commiteó solo el párrafo de §VI.5, `a9a2d76`).
 
 ---
 
@@ -233,10 +318,12 @@ un dataset B2B propio.
 
 ### 2.4 `_PROMPT_HECHOS_DOCUMENTO` y el scraping estructurado
 
-El scraping estructurado (`extract_catalog`) tiene un guard que falla ruidoso si
-alguien configura una `ScrapingSource`, porque el prompt se reescribió a B2B y el
-parser sigue esperando el JSON del vertical viejo. Adaptarlo es trabajo con su
-propio diseño; este bot no lo usa (su conocimiento entra por `.md`).
+**Resuelto el 2026-09-23.** El sitio sí se scrapea (`ScrapingSource` 2,
+https://in-touch.cl) y entra al RAG además de los `.md`. El runner ya no llama a
+`extract_catalog` para este vertical (`catalogo_estructurado_disponible()`); en
+su lugar guarda `ContactoInstitucional` (teléfono, correo y direcciones), que va
+a la ficha de cada turno. El guard de `extract_catalog` sigue como defensa para
+otros llamadores. Detalle en `hilo.md` del 2026-09-23 y en el spec §12.6.
 
 ### 2.5 Avisos del `doctor` que quedan
 
